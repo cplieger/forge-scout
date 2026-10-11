@@ -23,13 +23,42 @@ A scan reads at most 10 pages of repositories per owner, 40 pages of open pull r
 ## Leaving repositories and items out
 
 - `exclude_repos` drops a repository from every signal. Write the full path, such as `owner/name`. Matching ignores case.
-- `exclude_authors` and `exclude_labels` leave out open pull requests and issues by those authors or with any of those labels. Bot logins differ per forge, so check what your forge reports: the Debug log names each item it leaves out, and `scan complete` counts them as `excluded_prs` and `excluded_issues`.
+- `exclude` leaves out the open pull requests and issues that match one of its rules. The top-level `exclude` list applies to every connection, and a connection's own `exclude` list adds its rules after those. A rule sets one or more of these conditions, and an item is left out when it meets every condition of at least one rule:
+  - `kind`: `pull_request` or `issue`. A rule without it reads both.
+  - `author`: the login that opened the item. Matching ignores case.
+  - `label`: a label the item carries. Matching ignores case.
+  - `title`: a [Go regular expression](https://pkg.go.dev/regexp/syntax) found anywhere in the title, as the forge sent it. Matching is case-sensitive unless the expression starts with `(?i)`, and `^` and `$` anchor it.
+  - `repo`: the repository's full `owner/name` path. Matching ignores case.
+  - `draft`: `true` for draft pull requests, `false` for the others. An issue never meets it.
 - `bot_authors` names logins that the dashboard's From column shows as bots. Any login ending in `[bot]` counts as a bot already.
 - `security.include_private: true` reads code scanning on private repositories too. Set it when the account has GitHub Advanced Security on its private repositories. Their workflows are read either way.
 - `security.skip_repos` skips only the code-scanning read of a repository and keeps its other signals. Use it for a repository that answers every code-scanning read with 403, such as a private one without GitHub Advanced Security while `include_private` is on.
 - `security.enabled: false` turns code scanning off for the connection.
 
 A skipped repository counts neither as read nor as failed, so it never marks a scan degraded and never hides a real code-scanning outage. A repository that is not skipped and answers 403 without a rate-limit header stops every request of that connection for the rest of the scan, because GitHub sends the same answer for a secondary rate limit, and the scan is degraded (see `github_refused` in [Monitoring](monitoring.md#scan-summary-and-integrity)). A `security` key on a connection that is not GitHub logs `security settings ignored: code scanning is GitHub-only` once per scan.
+
+This file leaves out Renovate's pull requests by the login that opens them, dependency update pull requests from any author by their label, and the draft pull requests of one connection:
+
+```yaml
+exclude:
+  # The hosted Renovate app. A self-hosted Renovate opens its pull requests
+  # as the account its token belongs to, so name that login instead.
+  - author: "renovate[bot]"
+  - kind: pull_request
+    label: dependencies
+connections:
+  - name: github
+    url: https://github.com
+    token: ${GITHUB_TOKEN}
+    owners: [your-login]
+    exclude:
+      - kind: pull_request
+        draft: true
+```
+
+forge-scout leaves an excluded item out before it ranks, counts or lists anything, and sends no checks read for an excluded pull request. `scan complete` counts the items left out as `excluded_prs` and `excluded_issues`, the Overview's Open pull requests and Open issues tiles show them as Excluded by filters, and an excluded item never makes a read `partial`. Logins and labels differ per forge and per setup, so check what your forge reports: at `log_level: debug`, an `excluded item` line names each item left out and the rule that matched it, such as `connections[1].exclude[2]`.
+
+Each condition is matched as written, so spaces around a value are part of it. A rule that sets no condition, a condition written empty (such as `label:` with no value), an unknown condition, a `kind` other than `pull_request` or `issue`, a `title` that is not a valid expression, a `repo` that is not a full path such as `owner/name` with no leading, trailing or doubled `/`, or `draft` beside `kind: issue` stops the start with an error naming the rule.
 
 ## How the file is read
 

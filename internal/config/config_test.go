@@ -86,14 +86,16 @@ func TestLoad_parses_every_key(t *testing.T) {
 scan_interval: 30m
 lookback: 48h
 log_level: debug
+exclude:
+  - author: Renovate
 connections:
   - name: github
     url: https://github.com
     token: ${GITHUB_TOKEN}
     owners: [example, example-org]
     exclude_repos: [Example/Noisy]
-    exclude_authors: [Renovate, "renovate[bot]"]
-    exclude_labels: [Renovate]
+    exclude:
+      - {kind: pull_request, label: Dependencies, title: '^chore\(deps\)', repo: Example/Lib, draft: true}
     bot_authors: [My-Bot]
     security: { enabled: false, skip_forks: false, include_private: true, skip_repos: [example/private] }
   - name: home_gitea
@@ -118,9 +120,22 @@ connections:
 		t.Fatalf("connections = %d, want 2", len(cfg.Connections))
 	}
 	gh, gt := cfg.Connections[0], cfg.Connections[1]
-	if !gh.ExcludeRepos["example/noisy"] || !gh.ExcludeAuthors["renovate"] || !gh.ExcludeAuthors["renovate[bot]"] ||
-		!gh.ExcludeLabels["renovate"] || !gh.BotAuthors["my-bot"] {
-		t.Errorf("github excludes = repos %v authors %v labels %v bots %v, want each lowercased", gh.ExcludeRepos, gh.ExcludeAuthors, gh.ExcludeLabels, gh.BotAuthors)
+	if !gh.ExcludeRepos["example/noisy"] || !gh.BotAuthors["my-bot"] {
+		t.Errorf("github excludes = repos %v bots %v, want each lowercased", gh.ExcludeRepos, gh.BotAuthors)
+	}
+	if len(gh.Exclude) != 2 {
+		t.Fatalf("github exclude rules = %d, want the top-level rule then its own", len(gh.Exclude))
+	}
+	if top := gh.Exclude[0]; top.Path != "exclude[1]" || top.Author != "Renovate" || top.Kind != kindAny || top.Title != nil || top.Draft != nil {
+		t.Errorf("github exclude[0] = %+v, want the top-level author rule, any kind", top)
+	}
+	own := gh.Exclude[1]
+	if own.Path != "connections[1].exclude[1]" || own.Kind != KindPullRequest || own.Label != "Dependencies" || own.Repo != "Example/Lib" ||
+		own.Title == nil || own.Title.String() != `^chore\(deps\)` || own.Draft == nil || !*own.Draft {
+		t.Errorf("github exclude[1] = %+v, want the connection's pull request rule with every condition", own)
+	}
+	if len(gt.Exclude) != 1 || gt.Exclude[0].Path != "exclude[1]" {
+		t.Errorf("gitea exclude rules = %+v, want only the top-level rule", gt.Exclude)
 	}
 	if gh.Security.Enabled || gh.Security.SkipForks || !gh.Security.IncludePrivate || !gh.Security.SkipRepos["example/private"] || !gh.SecuritySet {
 		t.Errorf("github Security = %+v set %t, want disabled, forks and private repositories read, example/private skipped, set explicitly", gh.Security, gh.SecuritySet)
@@ -162,6 +177,35 @@ func TestLoad_refuses_invalid_files(t *testing.T) {
 		{"duplicate_owner", "connections:\n  - name: a\n    url: https://github.com\n    token: x\n    owners: [o, O]\n", "owner"},
 		{"bare_exclude_repo", "connections:\n  - name: a\n    url: https://github.com\n    token: x\n    owners: [o]\n    exclude_repos: [noisy]\n", "exclude_repos"},
 		{"bare_skip_repo", "connections:\n  - name: a\n    url: https://github.com\n    token: x\n    owners: [o]\n    security: {skip_repos: [noisy]}\n", "skip_repos"},
+		{"exclude_unknown_condition", "exclude:\n  - {author: a, milestone: m}\n" + minimal, "milestone"},
+		{"unknown_key_exclude_authors", "connections:\n  - name: a\n    url: https://github.com\n    token: x\n    owners: [o]\n    exclude_authors: [renovate]\n", "exclude_authors"},
+		{"unknown_key_exclude_labels", "connections:\n  - name: a\n    url: https://github.com\n    token: x\n    owners: [o]\n    exclude_labels: [renovate]\n", "exclude_labels"},
+		{"exclude_empty_rule", "exclude:\n  - {author: a}\n  - {}\n" + minimal, "exclude[2]: the rule sets no condition"},
+		{"exclude_null_rule", "exclude:\n  -\n" + minimal, "exclude[1]: the rule sets no condition"},
+		{"exclude_invalid_title", "exclude:\n  - {author: a}\n  - {title: '(unclosed'}\n" + minimal, "exclude[2]: title is not a valid regular expression"},
+		{"exclude_invalid_title_on_a_connection", "connections:\n  - name: a\n    url: https://github.com\n    token: x\n    owners: [o]\n    exclude:\n      - {title: 'a[z-a]'}\n", "connections[1].exclude[1]: title is not a valid regular expression"},
+		{"exclude_draft_of_an_issue", "exclude:\n  - {kind: issue, draft: true}\n" + minimal, "exclude[1]: draft matches only pull requests, so it cannot be set with kind: issue"},
+		{"exclude_unknown_kind", "exclude:\n  - {kind: merge_request}\n" + minimal, "exclude[1]: kind must be pull_request or issue"},
+		{"exclude_empty_author", "exclude:\n  - {author: ' ', label: x}\n" + minimal, "exclude[1]: author is empty"},
+		{"exclude_empty_title", "exclude:\n  - {title: ''}\n" + minimal, "exclude[1]: title is empty"},
+		{"exclude_null_author_beside_a_label", "exclude:\n  - {author: , label: x}\n" + minimal, "exclude[1]: author is empty"},
+		{"exclude_tilde_author_beside_a_label", "exclude:\n  - author: ~\n    label: x\n" + minimal, "exclude[1]: author is empty"},
+		{"exclude_null_label_beside_an_author", "exclude:\n  - {author: renovate, label: null}\n" + minimal, "exclude[1]: label is empty"},
+		{"exclude_null_repo_beside_an_author", "exclude:\n  - {repo: , author: x}\n" + minimal, "exclude[1]: repo is empty"},
+		{"exclude_null_kind_beside_an_author", "exclude:\n  - {kind: , author: x}\n" + minimal, "exclude[1]: kind is empty"},
+		{"exclude_null_draft_beside_an_author", "exclude:\n  - {draft: , author: x}\n" + minimal, "exclude[1]: draft is empty"},
+		{"exclude_null_draft_of_an_issue", "exclude:\n  - {kind: issue, draft: null}\n" + minimal, "exclude[1]: draft is empty"},
+		{"exclude_null_title_beside_a_kind", "exclude:\n  - {title: , kind: issue}\n" + minimal, "exclude[1]: title is empty"},
+		{"exclude_only_null_conditions", "exclude:\n  - {author: }\n" + minimal, "exclude[1]: author is empty"},
+		{"exclude_null_condition_through_a_merge_key", "exclude:\n  - &base {label: ~, author: y}\n  - {<<: *base, author: x}\n" + minimal, "exclude[2]: label is empty"},
+		{"exclude_null_author_on_a_connection", "connections:\n  - name: a\n    url: https://github.com\n    token: x\n    owners: [o]\n    exclude:\n      - {author: , label: x}\n", "connections[1].exclude[1]: author is empty"},
+		{"exclude_bare_repo", "exclude:\n  - {repo: noisy}\n" + minimal, "exclude[1]: repo must be a full owner/name path"},
+		{"exclude_slash_repo", "exclude:\n  - {repo: '/'}\n" + minimal, "exclude[1]: repo must be a full owner/name path"},
+		{"exclude_slashes_repo_beside_a_condition", "exclude:\n  - {repo: '//', author: x}\n" + minimal, "exclude[1]: repo must be a full owner/name path"},
+		{"exclude_slash_wrapped_repo", "exclude:\n  - {repo: '/owner/name/'}\n" + minimal, "exclude[1]: repo must be a full owner/name path"},
+		{"exclude_ownerless_repo", "exclude:\n  - {repo: '/name'}\n" + minimal, "exclude[1]: repo must be a full owner/name path"},
+		{"exclude_padded_kind", "exclude:\n  - {kind: ' issue '}\n" + minimal, "exclude[1]: kind must be pull_request or issue"},
+		{"exclude_not_a_list", "exclude: {author: a}\n" + minimal, "exclude"},
 		{"level_warn", "log_level: warn\n" + minimal, "log_level WARN"},
 		{"level_warning", "log_level: warning\n" + minimal, "log_level WARN"},
 		{"level_error", "log_level: error\n" + minimal, "log_level ERROR"},
@@ -457,6 +501,120 @@ func TestLoad_quotes_the_path_it_could_not_read(t *testing.T) {
 
 func mkfifo(path string) error { return syscall.Mkfifo(path, 0o600) }
 
+// loadExcludes loads a file whose one connection carries rules, below a
+// top-level list top, and returns that connection.
+func loadExcludes(t *testing.T, top, rules string) Connection {
+	t.Helper()
+	t.Setenv("GITHUB_TOKEN", "test-token")
+	body := "exclude:\n" + top + minimal + "    exclude:\n" + rules
+	if top == "" {
+		body = minimal + "    exclude:\n" + rules
+	}
+	cfg, _, err := Load(writeConfig(t, body))
+	if err != nil {
+		t.Fatalf("Setup: Load(%q) = %v", body, err)
+	}
+	return cfg.Connections[0]
+}
+
+func TestConnection_Excluded_needs_every_condition_of_one_rule(t *testing.T) {
+	c := loadExcludes(t, "", "      - {author: renovate-bot, label: dependencies}\n")
+	tests := []struct {
+		name string
+		item Item
+		want bool
+	}{
+		{"both", Item{Kind: KindPullRequest, Author: "renovate-bot", Labels: []string{"ci", "dependencies"}}, true},
+		{"author_alone", Item{Kind: KindPullRequest, Author: "renovate-bot", Labels: []string{"ci"}}, false},
+		{"label_alone", Item{Kind: KindPullRequest, Author: "someone", Labels: []string{"dependencies"}}, false},
+		{"neither", Item{Kind: KindIssue, Author: "someone"}, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, got := c.Excluded(&tc.item); got != tc.want {
+				t.Errorf("Excluded(%+v) = %t, want %t", tc.item, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestConnection_Excluded_matches_any_one_rule_and_names_the_first(t *testing.T) {
+	c := loadExcludes(t, "  - {author: tribble-trouble}\n", "      - {label: dependencies}\n      - {author: Tribble-Trouble, label: dependencies}\n")
+	tests := []struct {
+		name string
+		item Item
+		rule string
+		want bool
+	}{
+		{"top_level_rule", Item{Kind: KindPullRequest, Author: "tribble-trouble"}, "exclude[1]", true},
+		{"connection_rule", Item{Kind: KindIssue, Author: "someone", Labels: []string{"dependencies"}}, "connections[1].exclude[1]", true},
+		{"both_match_the_first_is_named", Item{Kind: KindPullRequest, Author: "tribble-trouble", Labels: []string{"dependencies"}}, "exclude[1]", true},
+		{"no_rule", Item{Kind: KindPullRequest, Author: "someone", Labels: []string{"bug"}}, "", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rule, got := c.Excluded(&tc.item)
+			if got != tc.want || rule != tc.rule {
+				t.Errorf("Excluded(%+v) = %q, %t, want %q, %t", tc.item, rule, got, tc.rule, tc.want)
+			}
+		})
+	}
+}
+
+func TestConnection_Excluded_reads_each_condition(t *testing.T) {
+	pr := func(it Item) Item { it.Kind = KindPullRequest; return it }
+	issue := func(it Item) Item { it.Kind = KindIssue; return it }
+	tests := []struct {
+		name, rule string
+		item       Item
+		want       bool
+	}{
+		{"kind_pull_request_takes_a_pull_request", "{kind: pull_request}", pr(Item{}), true},
+		{"kind_pull_request_leaves_an_issue", "{kind: pull_request}", issue(Item{}), false},
+		{"kind_issue_takes_an_issue", "{kind: issue}", issue(Item{}), true},
+		{"kind_issue_leaves_a_pull_request", "{kind: issue}", pr(Item{}), false},
+		{"author_ignores_case", "{author: Renovate}", issue(Item{Author: "renovate"}), true},
+		{"author_is_exact", "{author: renovate}", issue(Item{Author: "renovate[bot]"}), false},
+		{"label_ignores_case", "{label: Dependencies}", pr(Item{Labels: []string{"DEPENDENCIES"}}), true},
+		{"label_is_exact", "{label: dep}", pr(Item{Labels: []string{"dependencies"}}), false},
+		{"label_on_no_labels", "{label: dep}", pr(Item{}), false},
+		{"title_matches_anywhere", "{title: 'deps'}", pr(Item{Title: "chore(deps): bump x"}), true},
+		{"title_anchors_hold", "{title: '^deps'}", pr(Item{Title: "chore(deps): bump x"}), false},
+		{"title_is_case_sensitive", "{title: 'Deps'}", pr(Item{Title: "chore(deps): bump x"}), false},
+		{"title_takes_the_raw_bytes", "{title: '\\x1b\\[31m'}", issue(Item{Title: "red \x1b[31mtitle"}), true},
+		{"repo_ignores_case", "{repo: Owner/Name}", issue(Item{Repo: "owner/name"}), true},
+		{"repo_is_exact", "{repo: owner/name}", issue(Item{Repo: "owner/name-2"}), false},
+		{"repo_under_subgroups", "{repo: group/sub/name}", issue(Item{Repo: "group/sub/name"}), true},
+		{"padded_author_is_not_repaired", "{author: ' renovate '}", issue(Item{Author: "renovate"}), false},
+		{"padded_label_is_not_repaired", "{label: ' dependencies '}", pr(Item{Labels: []string{"dependencies"}}), false},
+		{"padded_repo_is_not_repaired", "{repo: ' owner/name '}", issue(Item{Repo: "owner/name"}), false},
+		{"draft_true_takes_a_draft", "{draft: true}", pr(Item{Draft: true}), true},
+		{"draft_true_leaves_a_ready_pull_request", "{draft: true}", pr(Item{}), false},
+		{"draft_false_takes_a_ready_pull_request", "{draft: false}", pr(Item{}), true},
+		{"draft_false_never_takes_an_issue", "{draft: false}", issue(Item{}), false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			c := loadExcludes(t, "", "      - "+tc.rule+"\n")
+			if _, got := c.Excluded(&tc.item); got != tc.want {
+				t.Errorf("rule %s Excluded(%+v) = %t, want %t", tc.rule, tc.item, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestConnection_Excluded_with_no_rule_keeps_every_item(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "test-token")
+	cfg, _, err := Load(writeConfig(t, minimal))
+	if err != nil {
+		t.Fatalf("Setup: Load(minimal) = %v", err)
+	}
+	c := cfg.Connections[0]
+	if rule, got := c.Excluded(&Item{Kind: KindPullRequest, Author: "renovate[bot]", Labels: []string{"dependencies"}}); got {
+		t.Errorf("Excluded with no rule = %q, true, want false", rule)
+	}
+}
+
 func TestLoad_the_shipped_example_config(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "test-token")
 	t.Setenv("FORGEJO_TOKEN", "test-token")
@@ -564,6 +722,9 @@ func TestLoad_never_shows_a_value_expanded_from_the_environment(t *testing.T) {
 		{"owner_invalid", "bad owner!", "connections:\n" + conn("a", "    owners: [\""+ref+"\"]\n"), nil, false},
 		{"exclude_repos_bare", "secretrepo", "connections:\n" + conn("a", owned+"    exclude_repos: [\""+ref+"\"]\n"), nil, false},
 		{"skip_repos_bare", "secretskip", "connections:\n" + conn("a", owned+"    security:\n      skip_repos: [\""+ref+"\"]\n"), nil, false},
+		{"exclude_title_invalid", "(secret-unclosed", "exclude:\n  - {title: \"" + ref + "\"}\n" + minimal, []string{"secret-unclosed"}, false},
+		{"exclude_repo_bare", "secretexcluded", "exclude:\n  - {repo: \"" + ref + "\"}\n" + minimal, nil, false},
+		{"exclude_kind_invalid", "secret-kind", "exclude:\n  - {kind: \"" + ref + "\"}\n" + minimal, nil, false},
 		{"decode_type_mismatch", "notabool-secret", "connections:\n" + conn("a", owned+"    private_addresses: "+ref+"\n"), nil, false},
 		{"token_beside_another_problem", "tok-secret-value", "connections:\n  - name: a\n    url: https://github.com\n    token: " + ref + "\n", nil, false},
 		{"token_variable_elsewhere", "tok-elsewhere-value", "connections:\n  - name: a\n    url: https://github.com\n    token: " + ref + "\n" + owned + "    bot_authors: [\"" + ref + "\"]\n", nil, false},

@@ -334,8 +334,7 @@ type endpoint struct {
 
 func connCfg(name string, owners ...string) config.Connection {
 	return config.Connection{
-		Name: name, URL: "https://" + name + ".forge.test", Owners: owners, ExcludeRepos: map[string]bool{}, ExcludeAuthors: map[string]bool{},
-		ExcludeLabels: map[string]bool{}, BotAuthors: map[string]bool{},
+		Name: name, URL: "https://" + name + ".forge.test", Owners: owners, ExcludeRepos: map[string]bool{}, BotAuthors: map[string]bool{},
 		Security: config.Security{Enabled: true, SkipForks: true, SkipRepos: map[string]bool{}},
 	}
 }
@@ -968,8 +967,7 @@ func TestScan_noise_exclusion_and_archived_intersection(t *testing.T) {
 		{Path: "o/r", DefaultBranch: "main"}, {Path: "o/old", Archived: true}, {Path: "o/noisy", DefaultBranch: "main"},
 	}}
 	ep.cfg.ExcludeRepos = map[string]bool{"o/noisy": true}
-	ep.cfg.ExcludeAuthors = map[string]bool{"renovate[bot]": true}
-	ep.cfg.ExcludeLabels = map[string]bool{"skip": true}
+	ep.cfg.Exclude = []config.Exclude{{Path: "exclude[1]", Author: "renovate[bot]"}, {Path: "exclude[2]", Label: "skip"}}
 	ep.conn.prs = map[string][]forge.PullRequest{"o": {
 		{Repo: "O/R", Number: 1, Author: "x"},
 		{Repo: "o/old", Number: 2, Author: "x"},
