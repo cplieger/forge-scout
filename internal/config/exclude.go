@@ -10,12 +10,12 @@ import (
 	"strings"
 )
 
-// Kind is the kind of open item an exclude rule reads.
-type Kind uint8
+// itemKind is the kind of open item an exclude rule reads.
+type itemKind uint8
 
-// An Item is KindPullRequest or KindIssue; a rule of KindAny reads both.
+// An Item is KindPullRequest or KindIssue; a rule of kindAny reads both.
 const (
-	KindAny Kind = iota
+	kindAny itemKind = iota
 	KindPullRequest
 	KindIssue
 )
@@ -27,7 +27,7 @@ type Item struct {
 	Author string
 	Title  string
 	Labels []string
-	Kind   Kind
+	Kind   itemKind
 	Draft  bool
 }
 
@@ -42,13 +42,13 @@ type Exclude struct {
 	Repo   string
 	// Path names the rule in the file, such as connections[1].exclude[2].
 	Path string
-	Kind Kind
+	Kind itemKind
 }
 
-// Matches reports whether it meets every condition e sets.
-func (e *Exclude) Matches(it *Item) bool {
+// matches reports whether it meets every condition e sets.
+func (e *Exclude) matches(it *Item) bool {
 	switch {
-	case e.Kind != KindAny && e.Kind != it.Kind,
+	case e.Kind != kindAny && e.Kind != it.Kind,
 		e.Draft != nil && (it.Kind != KindPullRequest || it.Draft != *e.Draft),
 		e.Author != "" && !strings.EqualFold(e.Author, it.Author),
 		e.Repo != "" && !strings.EqualFold(e.Repo, it.Repo),
@@ -62,7 +62,7 @@ func (e *Exclude) Matches(it *Item) bool {
 // Excluded returns the Path of the first of c's rules it matches.
 func (c *Connection) Excluded(it *Item) (rule string, ok bool) {
 	for i := range c.Exclude {
-		if c.Exclude[i].Matches(it) {
+		if c.Exclude[i].matches(it) {
 			return c.Exclude[i].Path, true
 		}
 	}

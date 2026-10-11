@@ -126,7 +126,7 @@ connections:
 	if len(gh.Exclude) != 2 {
 		t.Fatalf("github exclude rules = %d, want the top-level rule then its own", len(gh.Exclude))
 	}
-	if top := gh.Exclude[0]; top.Path != "exclude[1]" || top.Author != "Renovate" || top.Kind != KindAny || top.Title != nil || top.Draft != nil {
+	if top := gh.Exclude[0]; top.Path != "exclude[1]" || top.Author != "Renovate" || top.Kind != kindAny || top.Title != nil || top.Draft != nil {
 		t.Errorf("github exclude[0] = %+v, want the top-level author rule, any kind", top)
 	}
 	own := gh.Exclude[1]
