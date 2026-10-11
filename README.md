@@ -90,6 +90,7 @@ The file takes these keys:
 | `scan_interval` | `15m` | Time between scans, such as `15m` or `1h`, from 1 minute to 171 hours |
 | `lookback` | `72h` | How far back every scan reads CI runs, from `1h` to `720h`, at least 4.2 times `scan_interval`: two `scan_interval`, each up to 10% late, plus one scan at its limit of twice `scan_interval`. A re-run is seen while its run is younger than `lookback` |
 | `log_level` | `info` | `debug` or `info`. `warn` and `error` stop the start, because every line the dashboard reads is logged at `info` |
+| `exclude` | none | Rules that leave out open pull requests and issues on every connection. [Configuration](docs/configuration.md#leaving-repositories-and-items-out) describes them |
 | `connections` | required | One entry per forge instance, keys below |
 
 Each connection takes these keys:
@@ -102,8 +103,7 @@ Each connection takes these keys:
 | `token` | required | A read-only token, written as exactly one `${NAME}` reference to an environment variable |
 | `owners` | required | The users, organizations or GitLab groups whose repositories are scanned |
 | `exclude_repos` | none | Full `owner/name` paths left out of every signal |
-| `exclude_authors` | none | Logins whose open pull requests and issues are left out |
-| `exclude_labels` | none | Labels whose open pull requests and issues are left out |
+| `exclude` | none | More rules like the top-level `exclude`, applied to this connection after those |
 | `bot_authors` | none | Logins shown as bots, beside any login ending in `[bot]` |
 | `security` | `enabled: true`, `skip_forks: true`, `include_private: false` | `enabled`, `skip_forks`, `include_private` and `skip_repos` for code-scanning alerts |
 | `private_addresses` | `false` | Allow an instance on a private or loopback address |

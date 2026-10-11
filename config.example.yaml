@@ -23,6 +23,21 @@ lookback: 72h
 # scan complete included, is logged at info.
 log_level: info
 
+# Open pull requests and issues left out on every connection. An item is left
+# out when it meets every condition of one rule. The conditions are kind
+# (pull_request or issue), author, label and repo (a full owner/name path),
+# which ignore case, title, a Go regular expression, and draft (true or false,
+# pull requests only). Each item left out is counted in scan complete as
+# excluded_prs or excluded_issues. docs/configuration.md describes each
+# condition.
+exclude:
+  # The hosted Renovate app. A self-hosted Renovate opens its pull requests as
+  # the account its token belongs to, so name that login instead.
+  - author: "renovate[bot]"
+  # Dependency update pull requests from any author.
+  - kind: pull_request
+    label: dependencies
+
 connections:
   # One entry per forge instance. name is the label every log line carries
   # as connection: lowercase letters, digits, - and _, up to 32 characters.
@@ -40,10 +55,8 @@ connections:
     owners: [your-login]
     # Full owner/name paths left out of every signal.
     exclude_repos: []
-    # Open pull requests and issues by these authors, or carrying any of these
-    # labels, are left out. Matching ignores case.
-    exclude_authors: [renovate, "renovate[bot]"]
-    exclude_labels: [renovate]
+    # More exclude rules for this connection alone, after the top-level ones.
+    exclude: []
     # Logins counted as bots in the From column, beside any login ending in [bot].
     bot_authors: []
     # Code-scanning alerts, read on GitHub only. Forks are skipped by default,

@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cplieger/github-scout/internal/config"
 	"github.com/cplieger/github-scout/internal/forge"
 )
 
@@ -458,7 +459,7 @@ func TestScan_operator_exclusions_and_archived_repositories_leave_every_read_com
 		forge.Repo{Path: "o/old", DefaultBranch: "main", Archived: true}, forge.Repo{Path: "o/x", DefaultBranch: "main"},
 		forge.Repo{Path: "o/fork", DefaultBranch: "main", Fork: true})
 	ep.cfg.ExcludeRepos["o/x"] = true
-	ep.cfg.ExcludeAuthors["renovate[bot]"] = true
+	ep.cfg.Exclude = []config.Exclude{{Path: "exclude[1]", Author: "renovate[bot]"}}
 	ep.conn.prs["o"] = append(ep.conn.prs["o"],
 		forge.PullRequest{Repo: "o/old", Number: 5, Author: "x"}, forge.PullRequest{Repo: "o/r", Number: 6, Author: "renovate[bot]", HeadSHA: "h6"})
 	ep.conn.issues["o"] = append(ep.conn.issues["o"], forge.Issue{Repo: "o/x", Number: 7, Author: "x"})

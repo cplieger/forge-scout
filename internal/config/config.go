@@ -21,6 +21,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -62,19 +63,19 @@ type Config struct {
 	LogLevel     slog.Level
 }
 
-// Connection is one configured forge instance. The four sets hold lowercased
-// entries: repository paths, author logins, label names, bot logins.
+// Connection is one configured forge instance. The two sets hold lowercased
+// entries: repository paths and bot logins.
 type Connection struct {
-	ExcludeRepos     map[string]bool
-	ExcludeAuthors   map[string]bool
-	ExcludeLabels    map[string]bool
-	BotAuthors       map[string]bool
-	Name             string
-	URL              string
-	APIURL           string
-	Token            string
-	Security         Security
-	Owners           []string
+	ExcludeRepos map[string]bool
+	BotAuthors   map[string]bool
+	Name         string
+	URL          string
+	APIURL       string
+	Token        string
+	Security     Security
+	Owners       []string
+	// Exclude is the file's top-level rules, then the connection's own.
+	Exclude          []Exclude
 	PrivateAddresses bool
 	AllowPlaintext   bool
 	// SecuritySet reports a security key written explicitly, which the
@@ -108,21 +109,21 @@ type fileConfig struct {
 	Lookback     string           `yaml:"lookback"`
 	LogLevel     string           `yaml:"log_level"`
 	Connections  []fileConnection `yaml:"connections"`
+	Exclude      []*fileExclude   `yaml:"exclude"`
 }
 
 type fileConnection struct {
-	Security         *fileSecurity `yaml:"security"`
-	Name             string        `yaml:"name"`
-	URL              string        `yaml:"url"`
-	APIURL           string        `yaml:"api_url"`
-	Token            string        `yaml:"token"`
-	Owners           []string      `yaml:"owners"`
-	ExcludeRepos     []string      `yaml:"exclude_repos"`
-	ExcludeAuthors   []string      `yaml:"exclude_authors"`
-	ExcludeLabels    []string      `yaml:"exclude_labels"`
-	BotAuthors       []string      `yaml:"bot_authors"`
-	PrivateAddresses bool          `yaml:"private_addresses"`
-	AllowPlaintext   bool          `yaml:"allow_plaintext"`
+	Security         *fileSecurity  `yaml:"security"`
+	Name             string         `yaml:"name"`
+	URL              string         `yaml:"url"`
+	APIURL           string         `yaml:"api_url"`
+	Token            string         `yaml:"token"`
+	Owners           []string       `yaml:"owners"`
+	ExcludeRepos     []string       `yaml:"exclude_repos"`
+	Exclude          []*fileExclude `yaml:"exclude"`
+	BotAuthors       []string       `yaml:"bot_authors"`
+	PrivateAddresses bool           `yaml:"private_addresses"`
+	AllowPlaintext   bool           `yaml:"allow_plaintext"`
 }
 
 type fileSecurity struct {
@@ -157,7 +158,9 @@ func Load(path string) (Config, []Warning, error) {
 		warns = append(warns, Warning{Msg: "invalid log_level, using default", Attrs: []slog.Attr{slog.String("default", "info")}})
 	}
 	cfg.LogLevel = lvl
-	conns, errs := connections(fc.Connections, src)
+	top, errs := excludeRules("exclude", fc.Exclude, src)
+	conns, cerrs := connections(fc.Connections, top, src)
+	errs = append(errs, cerrs...)
 	if err := src.overlap(cfg.ScanInterval, cfg.Lookback); err != nil {
 		errs = append(errs, err)
 	}
@@ -422,7 +425,7 @@ func (s source) duration(warns []Warning, key, raw string, def, lo, hi time.Dura
 	return clamped, warns
 }
 
-func connections(in []fileConnection, src source) ([]Connection, []error) {
+func connections(in []fileConnection, top []Exclude, src source) ([]Connection, []error) {
 	if len(in) == 0 {
 		return nil, []error{errors.New("the file declares no connection, and at least one connection is required")}
 	}
@@ -430,7 +433,7 @@ func connections(in []fileConnection, src source) ([]Connection, []error) {
 	seen := make(map[string]bool, len(in))
 	out := make([]Connection, 0, len(in))
 	for i := range in {
-		c, cerrs := connection(&in[i], i, src)
+		c, cerrs := connection(&in[i], i, top, src)
 		errs = append(errs, cerrs...)
 		if c.Name != "" && seen[c.Name] {
 			errs = append(errs, fmt.Errorf("connection %q is named twice", src.show(connectionPath(i)+".name", c.Name)))
@@ -441,7 +444,7 @@ func connections(in []fileConnection, src source) ([]Connection, []error) {
 	return out, errs
 }
 
-func connection(fc *fileConnection, index int, src source) (Connection, []error) {
+func connection(fc *fileConnection, index int, top []Exclude, src source) (Connection, []error) {
 	name := strings.TrimSpace(fc.Name)
 	at := connectionPath(index)
 	label := fmt.Sprintf("connection %d", index+1)
@@ -458,10 +461,11 @@ func connection(fc *fileConnection, index int, src source) (Connection, []error)
 		Token:            fc.Token,
 		PrivateAddresses: fc.PrivateAddresses,
 		AllowPlaintext:   fc.AllowPlaintext,
-		ExcludeAuthors:   lowerSet(fc.ExcludeAuthors),
-		ExcludeLabels:    lowerSet(fc.ExcludeLabels),
 		BotAuthors:       lowerSet(fc.BotAuthors),
 	}
+	own, eerrs := excludeRules(at+".exclude", fc.Exclude, src)
+	errs = append(errs, eerrs...)
+	c.Exclude = append(slices.Clone(top), own...)
 	errs = append(errs, checkURL(label, "url", c.URL, true, c.AllowPlaintext)...)
 	errs = append(errs, checkURL(label, "api_url", c.APIURL, false, c.AllowPlaintext)...)
 	errs = append(errs, checkToken(label, c.Token, src[at+".token"])...)

@@ -35,6 +35,8 @@ func FuzzLoad(f *testing.F) {
 	f.Add("lookback: ${FORGE_SCOUT_FUZZ_DURATION}\n" + minimal)
 	f.Add("scan_interval: 1h\nlookback: ${FORGE_SCOUT_FUZZ_SHORT}\n" + minimal)
 	f.Add("log_level: ${FORGE_SCOUT_FUZZ_LEVEL}\n" + minimal)
+	f.Add("exclude:\n  - {title: \"(${FORGE_SCOUT_FUZZ_TOKEN}\", kind: issue, draft: true}\n" + minimal)
+	f.Add("exclude:\n  - {repo: \"${FORGE_SCOUT_FUZZ_TOKEN}\", kind: \"${FORGE_SCOUT_FUZZ_TOKEN}\"}\n" + minimal)
 	f.Add("connections:\n  - name: ${FORGE_SCOUT_FUZZ_TOKEN}\n    url: https://github.com\n    token: x\n    owners: [${FORGE_SCOUT_FUZZ_TOKEN}]\n")
 	f.Add("connections:\n  - name: ${GITHUB_TOKEN}")
 	f.Add("connections: [1, 2]\n")

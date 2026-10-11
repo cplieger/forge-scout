@@ -8,9 +8,9 @@ The first scan runs as soon as the container starts, then one every `scan_interv
 
 1. Opens the connection, which detects the product and reads the account the token belongs to.
 2. Lists the repositories of each owner and keeps those that are neither archived nor excluded.
-3. Lists the open pull requests and issues of each owner, and keeps those in a kept repository whose author and labels are not excluded.
+3. Lists the open pull requests and issues of each owner, and keeps those in a kept repository that no `exclude` rule matches.
 4. Reads each kept repository's CI runs created inside the lookback window, the last `lookback`.
-5. Reads the checks of each open pull request's head commit, where the forge names one.
+5. Reads the checks of each kept pull request's head commit, where the forge names one.
 6. On GitHub, reads each repository's open code-scanning alerts and its workflow definitions, which give the disabled workflows and the ones deleted or renamed.
 
 When a connection's reads end, forge-scout logs a `ci run` line for each run that is new or whose state or update time changed since a scan last saw it, then saves the runs it read. Delivery is at least once: a crash can repeat a run line, never drop one. A crash between the lines and the save logs them again after the restart, because the saved state does not hold them yet. When every connection has been read, forge-scout logs the open work, the failing and slowest workflows and the alerts of the whole scan in one burst, then one `scan complete` line per connection. Every line of the burst carries the same `scan_id`, the time the scan started in Unix milliseconds, and its `rank` in its list, so a dashboard reads exactly one scan. A scan stopped by the container shutting down still logs and saves its runs for 5 more seconds, so it ends inside Docker's default 10 second stop timeout. A run whose line those 5 seconds cut is not saved either, so the next start logs it. A shutdown before the burst logs none of it, and one during the burst ends it there, with no `scan complete` after that point, so a `scan_id` with no `scan complete` is not a whole scan.

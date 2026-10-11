@@ -525,14 +525,6 @@ func (c *Collector) repoIssues(ctx context.Context, cs *connState, r *connResult
 	return nil
 }
 
-// excluded reports a row whose author or a label is in the noise lists.
-func excluded(cfg *config.Connection, author string, labels []string) bool {
-	if cfg.ExcludeAuthors[strings.ToLower(author)] {
-		return true
-	}
-	return slices.ContainsFunc(labels, func(l string) bool { return cfg.ExcludeLabels[strings.ToLower(l)] })
-}
-
 // firstSeen reports an item not kept yet on this connection, and marks it.
 func (r *connResult) firstSeen(kind, repo string, number int) bool {
 	key := kind + " " + strings.ToLower(repo) + "#" + strconv.Itoa(number)
@@ -566,9 +558,10 @@ func (r *connResult) addPRs(prs []forge.PullRequest) {
 		if !r.inKept(famPRs, "pull request", pr.Repo) || !r.firstSeen("pr", pr.Repo, pr.Number) {
 			continue
 		}
-		if excluded(r.cfg, pr.Author, pr.Labels) {
+		it := config.Item{Kind: config.KindPullRequest, Repo: pr.Repo, Author: pr.Author, Title: pr.Title, Labels: pr.Labels, Draft: pr.Draft}
+		if rule, ok := r.cfg.Excluded(&it); ok {
 			r.ledger.drop(famPRs, dropExcludedItem, 1)
-			r.logExcluded("pull request", pr.Repo, pr.Author, pr.Labels)
+			r.logExcluded("pull request", &it, pr.Number, rule)
 			continue
 		}
 		r.prs = append(r.prs, prRow{pr: *pr})
@@ -581,18 +574,19 @@ func (r *connResult) addIssues(issues []forge.Issue) {
 		if !r.inKept(famIssues, "issue", is.Repo) || !r.firstSeen("issue", is.Repo, is.Number) {
 			continue
 		}
-		if excluded(r.cfg, is.Author, is.Labels) {
+		it := config.Item{Kind: config.KindIssue, Repo: is.Repo, Author: is.Author, Title: is.Title, Labels: is.Labels}
+		if rule, ok := r.cfg.Excluded(&it); ok {
 			r.ledger.drop(famIssues, dropExcludedItem, 1)
-			r.logExcluded("issue", is.Repo, is.Author, is.Labels)
+			r.logExcluded("issue", &it, is.Number, rule)
 			continue
 		}
 		r.issues = append(r.issues, issueRow{issue: *is})
 	}
 }
 
-func (r *connResult) logExcluded(kind, repo, author string, labels []string) {
-	r.log.Debug("excluded item", "kind", kind, "repo", bounded(repo), "author", bounded(author),
-		"labels", bounded(strings.Join(labels, ",")))
+func (r *connResult) logExcluded(kind string, it *config.Item, number int, rule string) {
+	r.log.Debug("excluded item", "kind", kind, "repo", bounded(it.Repo), "number", number, "author", bounded(it.Author),
+		"labels", bounded(strings.Join(it.Labels, ",")), "rule", rule)
 }
 
 func (c *Collector) readRuns(ctx context.Context, sc *scan, cs *connState, r *connResult) error {

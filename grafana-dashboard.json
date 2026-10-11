@@ -353,7 +353,7 @@
         "spec": {
           "id": 13,
           "title": "Open pull requests",
-          "description": "Pull requests open in the scanned repositories, summed over each connection's newest scan, after the authors and labels your config leaves out. The Open work tab lists each one. It reads No whole count in the newest scan when a selected connection's newest scan did not read it whole, stopped before counting or had no known forge, so narrow the Forge filter.",
+          "description": "Pull requests open in the scanned repositories, summed over each connection's newest scan. Counted leaves out the pull requests your exclude rules match, and Excluded by filters counts those. The Open work tab lists each counted one. It reads No whole count in the newest scan when a selected connection's newest scan did not read it whole, stopped before counting or had no known forge, so narrow the Forge filter.",
           "links": [],
           "data": {
             "kind": "QueryGroup",
@@ -377,6 +377,25 @@
                     "refId": "A",
                     "hidden": false
                   }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "loki",
+                      "version": "v0",
+                      "datasource": {
+                        "name": "${datasource}"
+                      },
+                      "spec": {
+                        "expr": "sum(last_over_time({container=\"forge-scout\"} |= `scan ` | json msg=\"msg\", forge=\"forge\", connection=\"connection\", excluded_prs=\"excluded_prs\", open_prs_read=\"open_prs_read\" | msg=`scan complete` or msg=`scan stopped` | forge=~\"$forge\" | label_format excluded_prs=`{{ if and (eq .open_prs_read \"complete\") .excluded_prs }}{{ .excluded_prs }}{{ else if or (eq .open_prs_read \"unsupported\") (eq .open_prs_read \"excluded\") }}{{ else }}NaN{{ end }}` | keep connection, excluded_prs | unwrap excluded_prs | __error__=\"\" [$__range]) by (connection))",
+                        "queryType": "instant"
+                      }
+                    },
+                    "refId": "B",
+                    "hidden": false
+                  }
                 }
               ],
               "transformations": [],
@@ -393,11 +412,11 @@
                 "graphMode": "none",
                 "justifyMode": "center",
                 "orientation": "auto",
-                "textMode": "value",
+                "textMode": "value_and_name",
                 "wideLayout": true,
                 "showPercentChange": false,
                 "text": {
-                  "titleSize": 14,
+                  "titleSize": 12,
                   "valueSize": 28
                 },
                 "reduceOptions": {
@@ -439,7 +458,52 @@
                     }
                   ]
                 },
-                "overrides": []
+                "overrides": [
+                  {
+                    "matcher": {
+                      "id": "byFrameRefID",
+                      "options": "A"
+                    },
+                    "properties": [
+                      {
+                        "id": "displayName",
+                        "value": "Counted"
+                      }
+                    ]
+                  },
+                  {
+                    "matcher": {
+                      "id": "byFrameRefID",
+                      "options": "B"
+                    },
+                    "properties": [
+                      {
+                        "id": "displayName",
+                        "value": "Excluded by filters"
+                      },
+                      {
+                        "id": "noValue",
+                        "value": "-"
+                      },
+                      {
+                        "id": "mappings",
+                        "value": [
+                          {
+                            "type": "special",
+                            "options": {
+                              "match": "nan",
+                              "result": {
+                                "index": 0,
+                                "text": "-",
+                                "color": "text"
+                              }
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
               }
             }
           }
@@ -450,7 +514,7 @@
         "spec": {
           "id": 14,
           "title": "Open issues",
-          "description": "Issues open in the scanned repositories, summed over each connection's newest scan, after the authors and labels your config leaves out. The Open work tab lists each one. It reads No whole count in the newest scan when a selected connection's newest scan did not read it whole, stopped before counting or had no known forge, so narrow the Forge filter.",
+          "description": "Issues open in the scanned repositories, summed over each connection's newest scan. Counted leaves out the issues your exclude rules match, and Excluded by filters counts those. The Open work tab lists each counted one. It reads No whole count in the newest scan when a selected connection's newest scan did not read it whole, stopped before counting or had no known forge, so narrow the Forge filter.",
           "links": [],
           "data": {
             "kind": "QueryGroup",
@@ -474,6 +538,25 @@
                     "refId": "A",
                     "hidden": false
                   }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "loki",
+                      "version": "v0",
+                      "datasource": {
+                        "name": "${datasource}"
+                      },
+                      "spec": {
+                        "expr": "sum(last_over_time({container=\"forge-scout\"} |= `scan ` | json msg=\"msg\", forge=\"forge\", connection=\"connection\", excluded_issues=\"excluded_issues\", open_issues_read=\"open_issues_read\" | msg=`scan complete` or msg=`scan stopped` | forge=~\"$forge\" | label_format excluded_issues=`{{ if and (eq .open_issues_read \"complete\") .excluded_issues }}{{ .excluded_issues }}{{ else if or (eq .open_issues_read \"unsupported\") (eq .open_issues_read \"excluded\") }}{{ else }}NaN{{ end }}` | keep connection, excluded_issues | unwrap excluded_issues | __error__=\"\" [$__range]) by (connection))",
+                        "queryType": "instant"
+                      }
+                    },
+                    "refId": "B",
+                    "hidden": false
+                  }
                 }
               ],
               "transformations": [],
@@ -490,11 +573,11 @@
                 "graphMode": "none",
                 "justifyMode": "center",
                 "orientation": "auto",
-                "textMode": "value",
+                "textMode": "value_and_name",
                 "wideLayout": true,
                 "showPercentChange": false,
                 "text": {
-                  "titleSize": 14,
+                  "titleSize": 12,
                   "valueSize": 28
                 },
                 "reduceOptions": {
@@ -536,7 +619,52 @@
                     }
                   ]
                 },
-                "overrides": []
+                "overrides": [
+                  {
+                    "matcher": {
+                      "id": "byFrameRefID",
+                      "options": "A"
+                    },
+                    "properties": [
+                      {
+                        "id": "displayName",
+                        "value": "Counted"
+                      }
+                    ]
+                  },
+                  {
+                    "matcher": {
+                      "id": "byFrameRefID",
+                      "options": "B"
+                    },
+                    "properties": [
+                      {
+                        "id": "displayName",
+                        "value": "Excluded by filters"
+                      },
+                      {
+                        "id": "noValue",
+                        "value": "-"
+                      },
+                      {
+                        "id": "mappings",
+                        "value": [
+                          {
+                            "type": "special",
+                            "options": {
+                              "match": "nan",
+                              "result": {
+                                "index": 0,
+                                "text": "-",
+                                "color": "text"
+                              }
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
               }
             }
           }
