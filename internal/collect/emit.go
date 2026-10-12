@@ -178,7 +178,7 @@ func (c *Collector) emitBurst(sc *scan, results []*connResult) {
 		emitDisabled(sc, row)
 	}
 	emitDays(sc, days)
-	c.emitSecurity(sc, alerts, top, tools(results))
+	emitSecurity(sc, alerts, top, results)
 	b := burst{failing: listed(failing), slow: listed(slow), disabled: listed(disabled), topAlerts: listed(top)}
 	for _, r := range results {
 		c.emitVerdict(sc, r, &b)
@@ -314,23 +314,27 @@ func alertAttrs(l *lineAttrs, a *forge.Alert) []slog.Attr {
 	return l.done()
 }
 
-// emitSecurity emits every alert, the top alerts of the same ranking and the
-// scan's per-tool counts, which belong to no single connection.
-func (c *Collector) emitSecurity(sc *scan, alerts, top []ranked[forge.Alert], counts []toolCount) {
+// emitSecurity emits every alert, the top alerts of the same ranking, then
+// each connection's per-tool counts, ranked within that connection.
+func emitSecurity(sc *scan, alerts, top []ranked[forge.Alert], results []*connResult) {
 	for _, row := range alerts {
 		sc.out.log(row.r.log, slog.LevelInfo, "security alert", alertAttrs(snapshotAttrs(sc, row), &row.row)...)
 	}
 	for _, row := range top {
 		sc.out.log(row.r.log, slog.LevelInfo, "top security alert", alertAttrs(snapshotAttrs(sc, row), &row.row)...)
 	}
-	log := Scope(c.logger, forge.ProductGitHub, "")
-	for i, t := range counts {
-		l := lineAttrs{attrs: []slog.Attr{slog.Int64("scan_id", sc.id), slog.Int("rank", i+1), slog.Int("forge_rank", i+1)}}
-		if !t.rollup {
-			l.text("tool", t.tool)
+	for _, r := range results {
+		if r.ledger.stop != nil {
+			continue
 		}
-		l.add(slog.Int("alerts", t.alerts), slog.Bool("rollup", t.rollup))
-		sc.out.log(log, slog.LevelInfo, "security tool", l.done()...)
+		for i, t := range tools(r) {
+			l := lineAttrs{attrs: []slog.Attr{slog.Int64("scan_id", sc.id), slog.Int("rank", i+1), slog.Int("forge_rank", i+1)}}
+			if !t.rollup {
+				l.text("tool", t.tool)
+			}
+			l.add(slog.Int("alerts", t.alerts), slog.Bool("rollup", t.rollup))
+			sc.out.log(r.log, slog.LevelInfo, "security tool", l.done()...)
+		}
 	}
 }
 

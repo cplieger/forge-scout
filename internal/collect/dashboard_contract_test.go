@@ -53,7 +53,8 @@ const scanEnds = "msg=`scan complete` or msg=`scan stopped`"
 var handlerKeys = []string{"time", "level", "msg"}
 
 // allowedWindows are Grafana's range and step; a fixed window assumes a
-// retention or a cadence, and hides a scan older than it.
+// retention or a cadence, and hides a scan older than it. The one exception
+// is snapshotLookback on a newest-line read, which checkSnapshotQuery binds.
 var allowedWindows = []string{"$__range", "$__interval"}
 
 // runKey is what makes two ci run lines the same delivery: a line is logged
@@ -90,6 +91,7 @@ type dashQuery struct {
 }
 
 type dashPanel struct {
+	name       string
 	title      string
 	viz        string
 	queries    []dashQuery
@@ -123,7 +125,7 @@ func dashboardPanels(d map[string]any) []dashPanel {
 	var out []dashPanel
 	for _, name := range slices.Sorted(maps.Keys(elements)) {
 		el, _ := elements[name].(map[string]any)
-		p := dashPanel{el: el}
+		p := dashPanel{el: el, name: name}
 		p.title, _ = field(el, "spec", "title").(string)
 		p.viz, _ = field(el, "spec", "vizConfig", "group").(string)
 		queries, _ := field(el, "spec", "data", "spec", "queries").([]any)
@@ -321,20 +323,25 @@ func checkExpr(c contract, expr string) []string {
 	if m := logQueryRe.FindStringSubmatch(expr); m != nil {
 		return append(problems, checkPipeline(c, m[1], "$__range")...)
 	}
-	pipes := pipelineRe.FindAllStringSubmatch(expr, -1)
+	pipes := pipelineRe.FindAllStringSubmatchIndex(expr, -1)
 	if len(pipes) == 0 {
 		return append(problems, "no log pipeline found")
 	}
 	for _, p := range pipes {
-		problems = append(problems, checkPipeline(c, p[1], p[2])...)
+		window := expr[p[4]:p[5]]
+		if window == snapshotLookback && strings.HasSuffix(expr[:p[0]], "last_over_time(") {
+			window = allowedWindows[0]
+		}
+		problems = append(problems, checkPipeline(c, expr[p[2]:p[3]], window)...)
 	}
 	return append(problems, checkGrouping(expr)...)
 }
 
 // checkGrouping applies the series rules of a metric query: an unwrapped
 // range aggregation names its grouping, no grouping names an item's
-// identity unless it is the run delivery key under an outer aggregation,
-// and a count of ci run lines counts each delivery once.
+// identity unless it is the run delivery key under an outer aggregation or
+// a snapshot read's rows, whose labels snapshotLabels binds, and a count of
+// ci run lines counts each delivery once.
 func checkGrouping(expr string) []string {
 	var problems []string
 	for _, loc := range overTimeRe.FindAllStringSubmatchIndex(expr, -1) {
@@ -355,7 +362,7 @@ func checkGrouping(expr string) []string {
 		}
 	}
 	var groups [][]string
-	for _, m := range byRe.FindAllStringSubmatch(expr, -1) {
+	for _, m := range byRe.FindAllStringSubmatch(snapshotByRe.ReplaceAllString(expr, ""), -1) {
 		var labels []string
 		for l := range strings.SplitSeq(strings.ReplaceAll(m[1], "$split", ""), ",") {
 			if l = strings.TrimSpace(l); l != "" {
@@ -384,6 +391,10 @@ func checkGrouping(expr string) []string {
 	return problems
 }
 
+// snapshotByRe is the grouping of a snapshot read's rows, and the topk that
+// keeps one series per item of them.
+var snapshotByRe = regexp.MustCompile(`\[` + snapshotLookback + `\]\) by \([^)]*\)|topk by \([^)]*\) \(1, `)
+
 func isIdentity(l string) bool { return slices.Contains(identityLabels, l) }
 
 func matchingParen(s string, open int) int {
@@ -402,12 +413,12 @@ func matchingParen(s string, open int) int {
 	return -1
 }
 
-// checkPanel applies the table rules: a log query sets its line limit, and
-// a log query over a snapshot message sits beside a one-line read of the
-// newest scan, joined inner on scan_id.
+// checkPanel applies the table rules: a log query reads events and sets its
+// line limit, and never reads a snapshot message, whose rows Loki would cut
+// at that limit across every connection. checkSnapshotQuery binds the
+// snapshot reads.
 func checkPanel(p *dashPanel) []string {
 	var problems []string
-	snapshot, newest := false, false
 	for _, q := range p.queries {
 		if !logQueryRe.MatchString(q.expr) {
 			continue
@@ -415,22 +426,11 @@ func checkPanel(p *dashPanel) []string {
 		if q.maxLines <= 0 {
 			problems = append(problems, "a log query with no line limit")
 		}
-		for _, msg := range snapshotMessages {
-			snapshot = snapshot || strings.Contains(q.expr, "msg=`"+msg+"`")
+		if slices.ContainsFunc(snapshotMessages, func(msg string) bool { return strings.Contains(q.expr, "msg=`"+msg+"`") }) {
+			problems = append(problems, "a snapshot read as a log query, whose line limit cuts a connection's rows when others fill it")
 		}
-		newest = newest || (q.maxLines == 1 && strings.Contains(q.expr, scanEnds) && strings.Contains(q.expr, "| keep scan_id"))
 	}
-	problems = append(problems, checkRunRows(p)...)
-	if !snapshot {
-		return problems
-	}
-	joined := slices.ContainsFunc(p.transforms, func(tr map[string]any) bool {
-		return tr["group"] == "joinByField" && tr["byField"] == "scan_id" && tr["mode"] == "inner"
-	})
-	if !newest || !joined {
-		problems = append(problems, "a snapshot read not joined inner on scan_id with a one-line read of the newest scan")
-	}
-	return problems
+	return append(problems, checkRunRows(p)...)
 }
 
 // checkRunRows applies the at-least-once rule to a table of ci run lines: a
@@ -491,24 +491,30 @@ func jsonKeys(expr string) map[string]bool {
 	return keys
 }
 
+// tileDropped is what a tile's label_format makes of a count whose read the
+// forge lacks or the config turns off. The tile drops it with != after
+// last_over_time: a line dropped before it lets that read fall back to an
+// older scan's count.
+const tileDropped = "-1"
+
 // checkTile applies the current-state rule: a stat over the scan summary
-// lines reads each connection's newest scan complete or scan stopped line in
-// the selected time range, and turns each count it unwraps into what the
-// tile adds up, as checkTileFormat states.
+// lines reads each connection's newest scan complete over the snapshot
+// lookback, a stop standing in only as a NaN arm, and turns each count it
+// unwraps into what the tile adds up, as checkTileFormat states.
 func checkTile(expr string) []string {
-	if !strings.Contains(expr, "scan complete") || !strings.Contains(expr, "| unwrap") {
+	logged := jsonKeys(expr)
+	if !strings.Contains(expr, "scan complete") || !slices.ContainsFunc(unwrapRe.FindAllStringSubmatch(expr, -1), func(m []string) bool {
+		return logged[m[1]] && m[1] != "scan_id"
+	}) {
 		return nil
 	}
 	var problems []string
-	if !strings.Contains(expr, scanEnds) {
-		problems = append(problems, "a tile that skips scan stopped shows the scan before a stop as the newest")
+	if !newestCompleteCounts(expr) {
+		problems = append(problems, "a tile not read with last_over_time(... scan complete ... ["+snapshotLookback+"]) by (connection) shows a stop's absent count, an older scan's, or none after a narrow range")
 	}
-	if !newestPerConnection(expr) {
-		problems = append(problems, "a tile not read with last_over_time(... [$__range]) by (connection) shows an older scan than each connection's newest in the selected range, or none")
-	}
-	logged := jsonKeys(expr)
 	for _, m := range unwrapRe.FindAllStringSubmatch(expr, -1) {
-		if !logged[m[1]] {
+		// scan_id is the scan's start, which an As of value dates a count by.
+		if !logged[m[1]] || m[1] == "scan_id" {
 			continue
 		}
 		lf := regexp.MustCompile(`\|\s*label_format\s+` + m[1] + "=`([^`]*)`").FindStringSubmatch(expr)
@@ -521,12 +527,36 @@ func checkTile(expr string) []string {
 	return problems
 }
 
+// newestCompleteCounts reports whether every read of expr takes each
+// connection's newest scan complete over the lookback, or is a stop's NaN
+// arm.
+func newestCompleteCounts(expr string) bool {
+	n, err := parseLogQL(expr)
+	if err != nil {
+		return false
+	}
+	complete := false
+	for _, r := range rangeNodes(n) {
+		switch msgs := rangeMessages(&r.node); {
+		case slices.Equal(msgs, []string{"scan complete"}):
+			complete = true
+			if r.node.fn != "last" || r.node.window != snapshotLookback || !slices.Equal(r.node.by, []string{"connection"}) {
+				return false
+			}
+		case slices.Equal(msgs, []string{"scan stopped"}) && fallbackArm(&r):
+		default:
+			return false
+		}
+	}
+	return complete
+}
+
 // checkTileFormat runs a tile's label_format of the count f, a Go
 // text/template as Loki runs it, over a scan line in each read state. The
 // count shows only when every read of it is complete; a line with no count,
 // as a stopped scan logs, or with a read in any other state reads NaN; and a
-// read the forge lacks or the config turns off yields nothing to unwrap, so
-// that connection adds nothing.
+// read the forge lacks or the config turns off reads tileDropped, which the
+// tile drops after last_over_time, so that connection adds nothing.
 func checkTileFormat(f, format string) []string {
 	tmpl, err := template.New(f).Option("missingkey=zero").Parse(format)
 	if err != nil {
@@ -561,14 +591,14 @@ func checkTileFormat(f, format string) []string {
 		problems = append(problems, "the tile shows "+got+" for a line with no "+f+", so a stopped scan lends it an older scan's value")
 	}
 	for _, r := range reads {
-		for state, want := range map[string]string{"partial": "NaN", "blind": "NaN", "unread": "NaN", "unsupported": "", "excluded": ""} {
+		for state, want := range map[string]string{"partial": "NaN", "blind": "NaN", "unread": "NaN", "unsupported": tileDropped, "excluded": tileDropped} {
 			line := whole("3")
 			line[r] = state
-			if want == "" {
+			if want == tileDropped {
 				delete(line, f)
 			}
 			if got := run(line); got != want {
-				problems = append(problems, "the tile shows "+cmp.Or(got, "nothing")+" for "+f+" when "+r+" is "+state+", want "+cmp.Or(want, "nothing"))
+				problems = append(problems, "the tile shows "+cmp.Or(got, "nothing")+" for "+f+" when "+r+" is "+state+", want "+want)
 			}
 		}
 	}
@@ -841,9 +871,14 @@ func TestDashboard_open_work_tiles_show_the_items_exclude_rules_leave_out(t *tes
 				if names[q.refID] == "" {
 					t.Errorf("query %s of %q has no displayName override, so the tile names its value %q", q.refID, title, "Value #"+q.refID)
 				}
-				for _, m := range tileFormatRe.FindAllStringSubmatch(q.expr, -1) {
-					if m[1] == count && names[q.refID] == excludedName {
-						shown = append(shown, formatLabels(t, m[2], []map[string]string{line})[0])
+				for _, r := range rangeNodes(mustParse(t, q.expr)) {
+					if !slices.Equal(rangeMessages(&r.node), []string{"scan complete"}) {
+						continue
+					}
+					for _, m := range tileFormatRe.FindAllStringSubmatch(r.node.pipeline, -1) {
+						if m[1] == count && names[q.refID] == excludedName {
+							shown = append(shown, formatLabels(t, m[2], []map[string]string{line})[0])
+						}
 					}
 				}
 			}
@@ -1172,7 +1207,7 @@ func TestDashboard_alerts_by_tool_tell_the_rollup_from_a_tool_named_other(t *tes
 
 // itemMessages each name one item of one connection. A repository path is
 // only unique within its connection, so a table of them names the connection.
-// security tool lines add up every GitHub connection of a scan and name none.
+// security tool lines name their connection but no repository.
 var itemMessages = []string{
 	"open pull request", "open issue", "failing workflow", "slow workflow", "disabled workflow",
 	"security alert", "top security alert", "ci run",
@@ -1188,7 +1223,7 @@ const connectionsVar = "connections"
 const repoCell = "| label_format repo=`{{ if eq .connection \"$" + connectionsVar + "\" }}{{ .repo }}{{ else }}{{ .repo }} on {{ .connection }}{{ end }}`"
 
 func readsItem(q dashQuery) bool {
-	return logQueryRe.MatchString(q.expr) && slices.ContainsFunc(itemMessages, func(msg string) bool {
+	return slices.ContainsFunc(itemMessages, func(msg string) bool {
 		return strings.Contains(q.expr, "msg=`"+msg+"`")
 	})
 }
@@ -1482,17 +1517,17 @@ func TestDashboard_contract_check_rejects(t *testing.T) {
 	stale := "sum(last_over_time(" + sel + " |= `scan complete` | json msg=\"msg\", connection=\"connection\", open_prs=\"open_prs\" | msg=`scan complete`" +
 		" | unwrap open_prs | __error__=\"\" [$__range]) by (connection))"
 	if problems := checkTile(stale); len(problems) != 2 {
-		t.Errorf("checkTile(last_over_time over scan complete alone) = %v, want the scan stopped and the NaN problems", problems)
+		t.Errorf("checkTile(last_over_time over the selected range) = %v, want the lookback and the NaN problems", problems)
 	}
 	tile := func(format string) string {
-		return "sum(last_over_time(" + sel + " |= `scan ` | json msg=\"msg\", connection=\"connection\", open_prs=\"open_prs\", open_prs_read=\"open_prs_read\"" +
-			" | " + scanEnds + " | label_format open_prs=`" + format + "` | unwrap open_prs | __error__=\"\" [$__range]) by (connection))"
+		return "sum(last_over_time(" + sel + " |= `scan complete` | json msg=\"msg\", connection=\"connection\", open_prs=\"open_prs\", open_prs_read=\"open_prs_read\"" +
+			" | msg=`scan complete` | label_format open_prs=`" + format + "` | unwrap open_prs | __error__=\"\" [7d]) by (connection))"
 	}
 	partial := tile(`{{ if .open_prs }}{{ .open_prs }}{{ else }}NaN{{ end }}`)
 	if problems := checkTile(partial); len(problems) != 5 {
 		t.Errorf("checkTile(a tile showing any logged count) = %v, want the three unfinished reads shown and the two missing signals as NaN", problems)
 	}
-	const prsLacking = `{{ else if or (eq .open_prs_read "unsupported") (eq .open_prs_read "excluded") }}`
+	const prsLacking = `{{ else if or (eq .open_prs_read "unsupported") (eq .open_prs_read "excluded") }}` + tileDropped
 	blanked := tile(`{{ if and (eq .open_prs_read "complete") .open_prs }}{{ .open_prs }}{{ else }}NaN{{ end }}`)
 	if problems := checkTile(blanked); len(problems) != 2 {
 		t.Errorf("checkTile(a tile a forge without the signal blanks) = %v, want unsupported and excluded read as NaN", problems)
@@ -1502,18 +1537,18 @@ func TestDashboard_contract_check_rejects(t *testing.T) {
 		t.Errorf("checkTile(newest-scan tile) = %v, want no problem", problems)
 	}
 	age := func(format string) string {
-		return "sum(last_over_time(" + sel + " |= `scan ` | json msg=\"msg\", connection=\"connection\", open_age_lt7d_issues=\"open_age_lt7d_issues\", open_prs_read=\"open_prs_read\", open_issues_read=\"open_issues_read\"" +
-			" | " + scanEnds + " | label_format open_age_lt7d_issues=`" + format + "` | unwrap open_age_lt7d_issues | __error__=\"\" [$__range]) by (connection))"
+		return "sum(last_over_time(" + sel + " |= `scan complete` | json msg=\"msg\", connection=\"connection\", open_age_lt7d_issues=\"open_age_lt7d_issues\", open_prs_read=\"open_prs_read\", open_issues_read=\"open_issues_read\"" +
+			" | msg=`scan complete` | label_format open_age_lt7d_issues=`" + format + "` | unwrap open_age_lt7d_issues | __error__=\"\" [7d]) by (connection))"
 	}
-	const issuesLacking = `{{ else if or (eq .open_issues_read "unsupported") (eq .open_issues_read "excluded") }}`
+	const issuesLacking = `{{ else if or (eq .open_issues_read "unsupported") (eq .open_issues_read "excluded") }}` + tileDropped
 	if problems := checkTile(age(`{{ if and (eq .open_prs_read "complete") .open_age_lt7d_issues }}{{ .open_age_lt7d_issues }}` + prsLacking + `{{ else }}NaN{{ end }}`)); len(problems) != 3 {
 		t.Errorf("checkTile(an issue age tile read through the pull request read) = %v, want the whole count hidden and unsupported and excluded issues read as NaN", problems)
 	}
 	if problems := checkTile(age(`{{ if and (eq .open_issues_read "complete") .open_age_lt7d_issues }}{{ .open_age_lt7d_issues }}` + issuesLacking + `{{ else }}NaN{{ end }}`)); len(problems) != 0 {
 		t.Errorf("checkTile(an issue age tile over the issue read) = %v, want no problem", problems)
 	}
-	for name, window := range map[string]string{"step window": "[$__interval]) by (connection)", "every connection together": "[$__range]) by (forge)"} {
-		older := strings.Replace(fresh, "[$__range]) by (connection)", window, 1)
+	for name, window := range map[string]string{"step window": "[$__interval]) by (connection)", "every connection together": "[7d]) by (forge)"} {
+		older := strings.Replace(fresh, "[7d]) by (connection)", window, 1)
 		if problems := checkTile(older); len(problems) != 1 {
 			t.Errorf("checkTile(tile over the %s) = %v, want the newest-scan problem", name, problems)
 		}
@@ -1521,18 +1556,26 @@ func TestDashboard_contract_check_rejects(t *testing.T) {
 	if problems := checkTile(strings.Replace(fresh, "last_over_time", "max_over_time", 1)); len(problems) != 1 {
 		t.Errorf("checkTile(tile with the largest count in the range) = %v, want the newest-scan problem", problems)
 	}
+	stopNaN := "last_over_time(" + sel + " |= `scan stopped` | json msg=\"msg\", connection=\"connection\", open_prs_read=\"open_prs_read\" | msg=`scan stopped`" +
+		" | label_format open_prs=`NaN` | unwrap open_prs | __error__=\"\" [7d]) by (connection)"
+	if problems := checkTile("sum((" + strings.TrimSuffix(strings.TrimPrefix(fresh, "sum("), ")") + " or on (connection) " + stopNaN + "))"); len(problems) != 0 {
+		t.Errorf("checkTile(newest complete count or a stop's NaN) = %v, want no problem", problems)
+	}
+	if problems := checkTile(strings.Replace(fresh, "|= `scan complete`", "|= `scan `", 1)); len(problems) != 0 {
+		t.Errorf("Setup: a wider line filter changes nothing, got %v", problems)
+	}
+	if problems := checkTile(strings.Replace(fresh, "msg=`scan complete`", scanEnds, 1)); len(problems) != 1 {
+		t.Errorf("checkTile(a tile over scan complete or scan stopped) = %v, want the newest-complete problem: a stop logs no count", problems)
+	}
 	ok := "sum by (state) (count by (connection, repo, run_id, state, updated_at, forge) (count_over_time(" + runs + " [$__interval])))"
 	if problems := checkExpr(c, ok); len(problems) != 0 {
 		t.Errorf("checkExpr(deduplicated run count) = %v, want no problem", problems)
 	}
-	newest := dashQuery{expr: sel + " |= `scan ` | json msg=\"msg\", scan_id=\"scan_id\" | " + scanEnds + " | keep scan_id", maxLines: 1}
 	issues := dashQuery{expr: sel + " |= `open issue` | json msg=\"msg\", scan_id=\"scan_id\" | msg=`open issue`", maxLines: 41}
-	join := map[string]any{"group": "joinByField", "byField": "scan_id", "mode": "inner"}
+	gaps := dashQuery{expr: sel + " |= `runs coverage gap` | json msg=\"msg\", repo=\"repo\" | msg=`runs coverage gap`"}
 	panels := map[string]dashPanel{
-		"no join":       {queries: []dashQuery{newest, issues}},
-		"outer join":    {queries: []dashQuery{newest, issues}, transforms: []map[string]any{{"group": "joinByField", "byField": "scan_id", "mode": "outer"}}},
-		"no scan read":  {queries: []dashQuery{issues}, transforms: []map[string]any{join}},
-		"no line limit": {queries: []dashQuery{newest, {expr: issues.expr}}, transforms: []map[string]any{join}},
+		"snapshot log query": {queries: []dashQuery{issues}},
+		"no line limit":      {queries: []dashQuery{gaps}},
 	}
 	for name, p := range panels {
 		t.Run(name, func(t *testing.T) {
@@ -1541,9 +1584,9 @@ func TestDashboard_contract_check_rejects(t *testing.T) {
 			}
 		})
 	}
-	good := dashPanel{queries: []dashQuery{newest, issues}, transforms: []map[string]any{join}}
+	good := dashPanel{queries: []dashQuery{{expr: gaps.expr, maxLines: 200}}}
 	if problems := checkPanel(&good); len(problems) != 0 {
-		t.Errorf("checkPanel(joined snapshot) = %v, want no problem", problems)
+		t.Errorf("checkPanel(bounded event read) = %v, want no problem", problems)
 	}
 	runRows := dashQuery{expr: runs, maxLines: 200}
 	newestFirst := map[string]any{"group": "sortBy", "sort": []any{map[string]any{"field": "Time", "desc": true}}}
