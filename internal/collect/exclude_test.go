@@ -50,13 +50,30 @@ func TestScan_exclude_rules_leave_items_out_of_every_row_and_count(t *testing.T)
 	want := map[string]string{
 		"open_prs": "1", "excluded_prs": "2", "open_issues": "1", "excluded_issues": "1",
 		"from_others_prs": "1", "from_others_issues": "1", "failing_checks_prs": "0", "checks_unread": "0",
-		"open_age_lt7d": "2", "open_age_90d_plus": "0", "idle_30d": "0",
+		"open_age_lt7d_prs": "1", "open_age_90d_plus_prs": "0", "idle_30d_prs": "0",
+		"open_age_lt7d_issues": "1", "open_age_90d_plus_issues": "0", "idle_30d_issues": "0",
 		"open_prs_read": "complete", "open_issues_read": "complete", "pr_checks_read": "complete",
 	}
 	for k, v := range want {
 		if c[k] != v {
 			t.Errorf("scan complete %s = %q, want %q", k, c[k], v)
 		}
+	}
+}
+
+// TestScan_an_author_rule_takes_a_bot_by_either_login holds the rule a REST login
+// names to the same App's GraphQL rows, which carry its login without the suffix.
+func TestScan_an_author_rule_takes_a_bot_by_either_login(t *testing.T) {
+	ep := githubEndpoint("gh")
+	ep.cfg.Exclude = []config.Exclude{{Path: "exclude[1]", Author: "tribble-trouble[bot]"}}
+	ep.conn.prs = map[string][]forge.PullRequest{"o": {
+		{Repo: "o/r", Number: 1, Author: "tribble-trouble", AuthorKind: forge.AccountBot, UpdatedAt: now},
+		{Repo: "o/r", Number: 2, Author: "tribble-trouble", AuthorKind: forge.AccountUser, UpdatedAt: now},
+	}}
+	h := newHarness(t, ep)
+	h.scan(t)
+	if prs := lines(h.rec, "open pull request"); len(prs) != 1 || prs[0]["number"] != "2" {
+		t.Errorf("open pull request lines = %v, want #2 alone: #1 is the App the rule names, #2 a person of that login", prs)
 	}
 }
 

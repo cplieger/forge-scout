@@ -9,6 +9,7 @@ import (
 	"os"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"text/template"
@@ -207,8 +208,8 @@ func recordContract(t *testing.T) contract {
 	gh.conn.checks = map[string]forge.CheckResult{"h1": {State: "failing"}}
 	gh.conn.issues = map[string][]forge.Issue{"o": {{Repo: "o/r", Number: 2, Ref: "#2", Title: "t", Author: "me", Labels: []string{"bug"}, CreatedAt: now.Add(-time.Hour), UpdatedAt: now}}}
 	gh.gh.alerts = map[string][]forge.Alert{"o/r": {
-		{Repo: "o/r", Number: 1, Rule: "go/sql-injection", Severity: "critical", Tool: "CodeQL", Source: "code_scanning", URL: "https://gh.test/a/1", CreatedAt: now},
-		{Repo: "o/r", Number: 2, Rule: "G104", Severity: "low", Tool: "gosec", Source: "code_scanning", URL: "https://gh.test/a/2", CreatedAt: now},
+		{Repo: "o/r", Number: 1, Rule: "go/sql-injection", SecuritySeverity: "critical", Tool: "CodeQL", Source: "code_scanning", URL: "https://gh.test/a/1", CreatedAt: now},
+		{Repo: "o/r", Number: 2, Rule: "G104", SecuritySeverity: "low", Tool: "gosec", Source: "code_scanning", URL: "https://gh.test/a/2", CreatedAt: now},
 	}}
 	gh.gh.workflows = map[string][]forge.Workflow{"o/r": {{Repo: "o/r", Name: "CI", State: "active"}, {Repo: "o/r", Name: "nightly", Path: ".github/workflows/n.yaml", State: "disabled_inactivity"}}}
 	gt.conn.prs = map[string][]forge.PullRequest{"o": {{Repo: "o/r", Number: 3, Ref: "#3", Title: "t", Author: "me", CreatedAt: now, UpdatedAt: now}}}
@@ -577,11 +578,8 @@ func checkTileFormat(f, format string) []string {
 
 // countReads names the read states a scan summary count is read through, as
 // completeAttrs logs it: the count is whole only when every one is complete.
-// The age and idle counts add up open pull requests and issues.
 func countReads(f string) []string {
 	switch {
-	case strings.HasPrefix(f, "open_age_") || strings.HasPrefix(f, "idle_"):
-		return []string{"open_prs_read", "open_issues_read"}
 	case f == "failing_checks_prs" || f == "checks_unread" || f == "checks_unsupported_for_token":
 		return []string{"pr_checks_read"}
 	case strings.HasSuffix(f, "_prs"):
@@ -645,6 +643,108 @@ func TestDashboard_count_tiles_read_the_newest_scan(t *testing.T) {
 	}
 	if tiles == 0 {
 		t.Fatalf("%s carries no count tile over scan complete", dashboardPath)
+	}
+}
+
+// countFamily is the list a scan summary count counts the items of, or ""
+// for a count of neither.
+func countFamily(f string) string {
+	switch reads := countReads(f); {
+	case slices.Contains(reads, "open_prs_read") || slices.Contains(reads, "pr_checks_read"):
+		return "pull requests"
+	case slices.Contains(reads, "open_issues_read"):
+		return "issues"
+	}
+	return ""
+}
+
+// itemLineFamilies maps each item line a panel can count to its list.
+var itemLineFamilies = map[string]string{"open pull request": "pull requests", "open issue": "issues"}
+
+var itemLineRe = regexp.MustCompile("msg=`([^`]*)`")
+
+var familyTitles = map[string]*regexp.Regexp{
+	"pull requests": regexp.MustCompile(`(?i)\b(pull requests?|PRs?)\b`),
+	"issues":        regexp.MustCompile(`(?i)\bissues?\b`),
+}
+
+// checkFamilies applies the family rule: a panel's title names every list
+// its counts count, so a query adding pull requests to issues sits only
+// under a title naming both, and a reader never takes a number for a list
+// it is not.
+func checkFamilies(p *dashPanel) []string {
+	var problems []string
+	counted := map[string]bool{}
+	for _, q := range p.queries {
+		inQuery := map[string]bool{}
+		for _, m := range unwrapRe.FindAllStringSubmatch(q.expr, -1) {
+			if f := countFamily(m[1]); f != "" {
+				inQuery[f], counted[f] = true, true
+			}
+		}
+		for _, m := range itemLineRe.FindAllStringSubmatch(q.expr, -1) {
+			if f := itemLineFamilies[m[1]]; f != "" {
+				inQuery[f], counted[f] = true, true
+			}
+		}
+		if len(inQuery) == 2 && (!familyTitles["pull requests"].MatchString(p.title) || !familyTitles["issues"].MatchString(p.title)) {
+			problems = append(problems, "query "+q.refID+" adds pull requests and issues together under a title that does not name both")
+		}
+	}
+	for _, f := range slices.Sorted(maps.Keys(counted)) {
+		if !familyTitles[f].MatchString(p.title) {
+			problems = append(problems, "the title does not name the "+f+" it counts")
+		}
+	}
+	return problems
+}
+
+func TestDashboard_panel_titles_name_the_list_they_count(t *testing.T) {
+	counting := 0
+	for _, p := range dashboardPanels(loadDashboard(t)) {
+		for _, q := range p.queries {
+			if m := unwrapRe.FindStringSubmatch(q.expr); m != nil && countFamily(m[1]) != "" {
+				counting++
+				break
+			}
+		}
+		for _, problem := range checkFamilies(&p) {
+			t.Errorf("panel %q: %s", p.title, problem)
+		}
+	}
+	if counting == 0 {
+		t.Fatalf("Setup: %s carries no panel counting pull requests or issues", dashboardPath)
+	}
+	query := func(fields ...string) dashQuery {
+		var parts []string
+		for _, f := range fields {
+			parts = append(parts, "sum(last_over_time({container=\"forge-scout\"} |= `scan ` | json msg=\"msg\", "+f+"=\""+f+"\" | "+scanEnds+" | unwrap "+f+" [$__range]) by (connection))")
+		}
+		return dashQuery{refID: "A", expr: strings.Join(parts, " + ")}
+	}
+	lines := func(msg string) dashQuery {
+		return dashQuery{refID: "B", expr: "{container=\"forge-scout\"} |= `" + msg + "` | json msg=\"msg\", repo=\"repo\" | msg=`" + msg + "`"}
+	}
+	cases := []struct {
+		panel dashPanel
+		want  int
+	}{
+		{dashPanel{title: "From other people", queries: []dashQuery{query("from_others_prs", "from_others_issues")}}, 3},
+		{dashPanel{title: "Untouched for 30 days or more", queries: []dashQuery{query("idle_30d_issues")}}, 1},
+		{dashPanel{title: "PRs untouched for 30+ days", queries: []dashQuery{query("idle_30d_issues")}}, 1},
+		{dashPanel{title: "PRs and issues from other people", queries: []dashQuery{query("from_others_prs", "from_others_issues")}}, 0},
+		{dashPanel{title: "Issues untouched for 30+ days", queries: []dashQuery{query("idle_30d_issues")}}, 0},
+		{dashPanel{title: "PRs with failing checks", queries: []dashQuery{query("failing_checks_prs")}}, 0},
+		{dashPanel{title: "Scan length per connection", queries: []dashQuery{query("duration_ms")}}, 0},
+		{dashPanel{title: "Open work by repository", queries: []dashQuery{lines("open pull request"), lines("open issue")}}, 2},
+		{dashPanel{title: "PRs and issues by repository", queries: []dashQuery{lines("open pull request"), lines("open issue")}}, 0},
+		{dashPanel{title: "Open issues listed", queries: []dashQuery{lines("open pull request")}}, 1},
+		{dashPanel{title: "Open pull requests", queries: []dashQuery{lines("open pull request")}}, 0},
+	}
+	for _, tc := range cases {
+		if problems := checkFamilies(&tc.panel); len(problems) != tc.want {
+			t.Errorf("checkFamilies(%q over %s) = %v, want %d problems", tc.panel.title, tc.panel.queries[0].expr, problems, tc.want)
+		}
 	}
 }
 
@@ -927,10 +1027,10 @@ func TestDashboard_snapshot_trends_count_only_whole_reads(t *testing.T) {
 			" | label_format msg=`scan complete`, " + field + "=`NaN` | unwrap " + field + " | __error__=\"\" [$__interval]) by (connection, msg, forge)"
 	}
 	const (
-		prsWhole  = " | open_prs_read=`complete`"
-		workWhole = prsWhole + " | open_issues_read=`complete`"
-		prsHas    = " | open_prs_read!~`unsupported|excluded`"
-		workHas   = prsHas + " | open_issues_read!~`unsupported|excluded`"
+		prsWhole    = " | open_prs_read=`complete`"
+		prsHas      = " | open_prs_read!~`unsupported|excluded`"
+		issuesWhole = " | open_issues_read=`complete`"
+		issuesHas   = " | open_issues_read!~`unsupported|excluded`"
 	)
 	sum := func(parts ...string) string { return "sum by (msg) (" + strings.Join(parts, " or ") + ")" }
 	cases := map[string]struct {
@@ -939,11 +1039,11 @@ func TestDashboard_snapshot_trends_count_only_whole_reads(t *testing.T) {
 	}{
 		"every scan's count":                 {sum(counted("open_prs", "")), 2},
 		"whole reads, no gap":                {sum(counted("open_prs", prsWhole)), 1},
-		"age blind to the issues":            {sum(counted("open_age_lt7d", prsWhole), unread("open_age_lt7d", workHas)), 1},
+		"issue age read through the prs":     {sum(counted("open_age_lt7d_issues", prsWhole), unread("open_age_lt7d_issues", prsHas)), 2},
 		"whole reads with the gap":           {sum(counted("open_prs", prsWhole), unread("open_prs", prsHas)), 0},
-		"age over both reads":                {sum(counted("open_age_lt7d", workWhole), unread("open_age_lt7d", workHas)), 0},
+		"issue age over the issue read":      {sum(counted("open_age_lt7d_issues", issuesWhole), unread("open_age_lt7d_issues", issuesHas)), 0},
 		"a gap where the forge lacks it":     {sum(counted("open_prs", prsWhole), unread("open_prs", "")), 1},
-		"an age gap where issues are absent": {sum(counted("open_age_lt7d", workWhole), unread("open_age_lt7d", prsHas)), 1},
+		"an age gap where issues are absent": {sum(counted("open_age_lt7d_issues", issuesWhole), unread("open_age_lt7d_issues", "")), 1},
 	}
 	for name, tc := range cases {
 		if problems := checkTrendReads(tc.expr); len(problems) != tc.want {
@@ -1039,7 +1139,7 @@ func TestDashboard_alerts_by_tool_tell_the_rollup_from_a_tool_named_other(t *tes
 	var alerts []forge.Alert
 	for i, tool := range []string{"other", "t1", "t2", "t3", "t4", "t5", "t6", "t7", "t8", "t9", "t10", "t11"} {
 		for range 20 - i {
-			alerts = append(alerts, forge.Alert{Repo: "o/r", Number: int64(len(alerts) + 1), Severity: "low", Tool: tool})
+			alerts = append(alerts, forge.Alert{Repo: "o/r", Number: int64(len(alerts) + 1), SecuritySeverity: "low", Tool: tool})
 		}
 	}
 	a.gh.alerts = map[string][]forge.Alert{"o/r": alerts}
@@ -1402,18 +1502,15 @@ func TestDashboard_contract_check_rejects(t *testing.T) {
 		t.Errorf("checkTile(newest-scan tile) = %v, want no problem", problems)
 	}
 	age := func(format string) string {
-		return "sum(last_over_time(" + sel + " |= `scan ` | json msg=\"msg\", connection=\"connection\", open_age_lt7d=\"open_age_lt7d\", open_prs_read=\"open_prs_read\", open_issues_read=\"open_issues_read\"" +
-			" | " + scanEnds + " | label_format open_age_lt7d=`" + format + "` | unwrap open_age_lt7d | __error__=\"\" [$__range]) by (connection))"
+		return "sum(last_over_time(" + sel + " |= `scan ` | json msg=\"msg\", connection=\"connection\", open_age_lt7d_issues=\"open_age_lt7d_issues\", open_prs_read=\"open_prs_read\", open_issues_read=\"open_issues_read\"" +
+			" | " + scanEnds + " | label_format open_age_lt7d_issues=`" + format + "` | unwrap open_age_lt7d_issues | __error__=\"\" [$__range]) by (connection))"
 	}
-	const workLacking = `{{ else if or (eq .open_prs_read "unsupported") (eq .open_prs_read "excluded") (eq .open_issues_read "unsupported") (eq .open_issues_read "excluded") }}`
-	if problems := checkTile(age(`{{ if and (eq .open_prs_read "complete") .open_age_lt7d }}{{ .open_age_lt7d }}` + workLacking + `{{ else }}NaN{{ end }}`)); len(problems) != 3 {
-		t.Errorf("checkTile(an age tile blind to the issues read) = %v, want the three unfinished issue reads shown", problems)
+	const issuesLacking = `{{ else if or (eq .open_issues_read "unsupported") (eq .open_issues_read "excluded") }}`
+	if problems := checkTile(age(`{{ if and (eq .open_prs_read "complete") .open_age_lt7d_issues }}{{ .open_age_lt7d_issues }}` + prsLacking + `{{ else }}NaN{{ end }}`)); len(problems) != 3 {
+		t.Errorf("checkTile(an issue age tile read through the pull request read) = %v, want the whole count hidden and unsupported and excluded issues read as NaN", problems)
 	}
-	if problems := checkTile(age(`{{ if and (eq .open_prs_read "complete") (eq .open_issues_read "complete") .open_age_lt7d }}{{ .open_age_lt7d }}` + prsLacking + `{{ else }}NaN{{ end }}`)); len(problems) != 2 {
-		t.Errorf("checkTile(an age tile a forge without issues blanks) = %v, want unsupported and excluded issues read as NaN", problems)
-	}
-	if problems := checkTile(age(`{{ if and (eq .open_prs_read "complete") (eq .open_issues_read "complete") .open_age_lt7d }}{{ .open_age_lt7d }}` + workLacking + `{{ else }}NaN{{ end }}`)); len(problems) != 0 {
-		t.Errorf("checkTile(an age tile over both reads) = %v, want no problem", problems)
+	if problems := checkTile(age(`{{ if and (eq .open_issues_read "complete") .open_age_lt7d_issues }}{{ .open_age_lt7d_issues }}` + issuesLacking + `{{ else }}NaN{{ end }}`)); len(problems) != 0 {
+		t.Errorf("checkTile(an issue age tile over the issue read) = %v, want no problem", problems)
 	}
 	for name, window := range map[string]string{"step window": "[$__interval]) by (connection)", "every connection together": "[$__range]) by (forge)"} {
 		older := strings.Replace(fresh, "[$__range]) by (connection)", window, 1)
@@ -1507,7 +1604,7 @@ func TestDashboard_maps_every_value_the_code_logs(t *testing.T) {
 	for _, s := range []forge.CheckState{forge.CheckPassing, forge.CheckFailing, forge.CheckPending, forge.CheckNeutral, forge.CheckNone, forge.CheckUnknown, forge.CheckUnreadable} {
 		checks = append(checks, string(s))
 	}
-	readColumns, causeColumns, checkColumns := 0, 0, 0
+	readColumns, causeColumns, checkColumns, severityColumns := 0, 0, 0, 0
 	for _, p := range panels {
 		for name, keys := range overrideMappings(&p) {
 			var want []string
@@ -1518,6 +1615,8 @@ func TestDashboard_maps_every_value_the_code_logs(t *testing.T) {
 				want, causeColumns = causes, causeColumns+1
 			case name == "checks":
 				want, checkColumns = checks, checkColumns+1
+			case name == "severity":
+				want, severityColumns = severityBuckets[:], severityColumns+1
 			default:
 				continue
 			}
@@ -1528,8 +1627,9 @@ func TestDashboard_maps_every_value_the_code_logs(t *testing.T) {
 			}
 		}
 	}
-	if readColumns == 0 || causeColumns == 0 || checkColumns == 0 {
-		t.Fatalf("read-state columns %d, cause columns %d, checks columns %d, want each mapped somewhere", readColumns, causeColumns, checkColumns)
+	if readColumns == 0 || causeColumns == 0 || checkColumns == 0 || severityColumns == 0 {
+		t.Fatalf("read-state columns %d, cause columns %d, checks columns %d, severity columns %d, want each mapped somewhere",
+			readColumns, causeColumns, checkColumns, severityColumns)
 	}
 	var stoppedPatterns string
 	for _, p := range panels {
@@ -1546,6 +1646,67 @@ func TestDashboard_maps_every_value_the_code_logs(t *testing.T) {
 		if !strings.Contains(stoppedPatterns, reason) {
 			t.Errorf("no stopped-scan panel names the stop reason %q", reason)
 		}
+	}
+}
+
+var severityFormatRe = regexp.MustCompile("\\|\\s*label_format\\s+severity=`([^`]*)`")
+
+// TestDashboard_severity_column_shows_each_alerts_bucket runs every alert
+// table's Severity template over the lines of alerts of each kind: the
+// column names the bucket scan complete counts the alert under, so an alert
+// with no security severity shows its problem severity.
+func TestDashboard_severity_column_shows_each_alerts_bucket(t *testing.T) {
+	ep := githubEndpoint("gh")
+	cases := []struct {
+		alert forge.Alert
+		want  string
+	}{
+		{forge.Alert{SecuritySeverity: "critical", ProblemSeverity: "error"}, "critical"},
+		{forge.Alert{SecuritySeverity: "high"}, "high"},
+		{forge.Alert{SecuritySeverity: "medium"}, "medium"},
+		{forge.Alert{SecuritySeverity: "low", ProblemSeverity: "note"}, "low"},
+		{forge.Alert{ProblemSeverity: "error"}, "unrated_error"},
+		{forge.Alert{ProblemSeverity: "warning"}, "unrated_warning"},
+		{forge.Alert{ProblemSeverity: "note"}, "unrated_note"},
+		{forge.Alert{}, "unrated"},
+		{forge.Alert{ProblemSeverity: "none"}, "unrated"},
+		{forge.Alert{ProblemSeverity: "unknown"}, "unrated"},
+		{forge.Alert{SecuritySeverity: "unknown", ProblemSeverity: "error"}, "unrated"},
+		{forge.Alert{SecuritySeverity: "unknown", ProblemSeverity: "warning"}, "unrated"},
+		{forge.Alert{SecuritySeverity: "unknown", ProblemSeverity: "unknown"}, "unrated"},
+	}
+	alerts := make([]forge.Alert, len(cases))
+	want := map[string]string{}
+	for i, c := range cases {
+		alerts[i] = c.alert
+		alerts[i].Repo, alerts[i].Tool, alerts[i].Number = "o/r", "t", int64(i+1)
+		want[strconv.Itoa(i+1)] = c.want
+		if got := severityBucket(&alerts[i]); got != c.want {
+			t.Errorf("severityBucket(security %q, problem %q) = %q, want %q", c.alert.SecuritySeverity, c.alert.ProblemSeverity, got, c.want)
+		}
+	}
+	ep.gh.alerts = map[string][]forge.Alert{"o/r": alerts}
+	h := newHarness(t, ep)
+	h.scan(t)
+	logged := lines(h.rec, "security alert")
+	columns := 0
+	for _, p := range dashboardPanels(loadDashboard(t)) {
+		for _, q := range p.queries {
+			m := severityFormatRe.FindStringSubmatch(q.expr)
+			if m == nil {
+				continue
+			}
+			columns++
+			for i, got := range formatLabels(t, m[1], logged) {
+				if number := logged[i]["number"]; got != want[number] {
+					t.Errorf("panel %q Severity of alert #%s (security %q, problem %q) = %q, want %q",
+						p.title, number, logged[i]["security_severity"], logged[i]["problem_severity"], got, want[number])
+				}
+			}
+		}
+	}
+	if columns == 0 {
+		t.Fatalf("Setup: %s has no Severity template", dashboardPath)
 	}
 }
 

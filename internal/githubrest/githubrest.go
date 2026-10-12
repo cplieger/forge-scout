@@ -15,6 +15,7 @@ import (
 	"net/netip"
 	"net/url"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -135,12 +136,34 @@ type apiAlert struct {
 	Rule      struct {
 		ID                    string `json:"id"`
 		Description           string `json:"description"`
+		Severity              string `json:"severity"`
 		SecuritySeverityLevel string `json:"security_severity_level"`
 	} `json:"rule"`
 	Tool struct {
 		Name string `json:"name"`
 	} `json:"tool"`
 	Number int64 `json:"number"`
+}
+
+// The values GitHub documents for an alert rule's severity and security
+// severity, each nullable
+// (https://docs.github.com/en/rest/code-scanning/code-scanning#list-code-scanning-alerts-for-a-repository).
+var (
+	problemSeverities  = []string{"none", "note", "warning", "error"}
+	securitySeverities = []string{"low", "medium", "high", "critical"}
+)
+
+// severity is raw as one of known in lower case, empty where GitHub sent
+// none, and unknown for any other value, so an undocumented value is named,
+// never dropped or echoed.
+func severity(raw string, known []string) string {
+	if raw == "" {
+		return ""
+	}
+	if v := strings.ToLower(raw); slices.Contains(known, v) {
+		return v
+	}
+	return "unknown"
 }
 
 // maxAlertPages bounds one repository's code-scanning read at 10,000 open
@@ -160,7 +183,7 @@ var alertRowBytes = int(reflect.TypeFor[forge.Alert]().Size())
 
 // alertBytes is what a holds beyond the strings it shares.
 func alertBytes(a *forge.Alert) int {
-	return alertRowBytes + len(a.Rule) + len(a.Severity) + len(a.Tool) + len(a.URL)
+	return alertRowBytes + len(a.Rule) + len(a.SecuritySeverity) + len(a.ProblemSeverity) + len(a.Tool) + len(a.URL)
 }
 
 var errAlertsTooLarge = fmt.Errorf("alerts hold more than %d bytes", maxAlertBytes)
@@ -260,7 +283,9 @@ func decodeAlerts(repo string, body []byte) ([]forge.Alert, error) {
 		a := &rows[i]
 		alerts = append(alerts, forge.Alert{
 			CreatedAt: a.CreatedAt, Repo: repo, Source: "code_scanning", Rule: cmp.Or(a.Rule.ID, a.Rule.Description),
-			Severity: a.Rule.SecuritySeverityLevel, Tool: a.Tool.Name, URL: a.HTMLURL, Number: a.Number,
+			SecuritySeverity: severity(a.Rule.SecuritySeverityLevel, securitySeverities),
+			ProblemSeverity:  severity(a.Rule.Severity, problemSeverities),
+			Tool:             a.Tool.Name, URL: a.HTMLURL, Number: a.Number,
 		})
 	}
 	return alerts, nil

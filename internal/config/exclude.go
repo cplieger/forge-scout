@@ -29,6 +29,8 @@ type Item struct {
 	Labels []string
 	Kind   itemKind
 	Draft  bool
+	// Bot is the forge saying Author is a bot account.
+	Bot bool
 }
 
 // Exclude is one exclude rule. It matches an Item that meets every condition
@@ -50,13 +52,24 @@ func (e *Exclude) matches(it *Item) bool {
 	switch {
 	case e.Kind != kindAny && e.Kind != it.Kind,
 		e.Draft != nil && (it.Kind != KindPullRequest || it.Draft != *e.Draft),
-		e.Author != "" && !strings.EqualFold(e.Author, it.Author),
+		e.Author != "" && !e.authorMatches(it),
 		e.Repo != "" && !strings.EqualFold(e.Repo, it.Repo),
 		e.Label != "" && !slices.ContainsFunc(it.Labels, func(l string) bool { return strings.EqualFold(e.Label, l) }),
 		e.Title != nil && !e.Title.MatchString(it.Title):
 		return false
 	}
 	return true
+}
+
+// authorMatches reports whether e's author condition names it.Author. A bot's
+// login matches with or without the [bot] suffix, because GitHub spells one App
+// renovate in GraphQL and renovate[bot] in REST.
+func (e *Exclude) authorMatches(it *Item) bool {
+	if strings.EqualFold(e.Author, it.Author) {
+		return true
+	}
+	login := func(s string) string { return strings.TrimSuffix(strings.ToLower(s), "[bot]") }
+	return it.Bot && login(e.Author) == login(it.Author)
 }
 
 // Excluded returns the Path of the first of c's rules it matches.

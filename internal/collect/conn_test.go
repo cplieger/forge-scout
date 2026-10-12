@@ -148,7 +148,7 @@ func TestScan_a_truncated_github_only_listing_emits_no_snapshot(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			ep := githubEndpoint("gh")
-			ep.gh.alerts = map[string][]forge.Alert{"o/r": {{Repo: "o/r", Number: 1, Severity: "low", Tool: "CodeQL"}}}
+			ep.gh.alerts = map[string][]forge.Alert{"o/r": {{Repo: "o/r", Number: 1, SecuritySeverity: "low", Tool: "CodeQL"}}}
 			ep.gh.workflows = map[string][]forge.Workflow{"o/r": {{Repo: "o/r", Name: "nightly", State: "disabled_manually"}}}
 			ep.gh.truncated = map[string]bool{tc.key: true}
 			h := newHarness(t, ep)

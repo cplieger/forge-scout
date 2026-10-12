@@ -44,12 +44,20 @@ connections:
   # Two entries for one instance need tokens of two different accounts.
   - name: github
     url: https://github.com
-    # A classic token with the repo scope, which also reads pull request
-    # checks. A fine-grained token with read-only Actions, Contents, Commit
-    # statuses, Pull requests, Issues and Code scanning alerts works too, but
-    # GitHub gives it no permission for check runs, so the checks of pull
-    # requests on private repositories are not available with it.
-    # docs/configuration.md lists the permissions for every forge.
+    # A fine-grained token with read-only Actions, Contents, Commit statuses,
+    # Pull requests, Issues and Code scanning alerts is the least access.
+    # GitHub offers fine-grained tokens no Checks permission, so the checks of
+    # pull requests on private repositories show as Not available with this
+    # token. Only a classic token with the `repo` scope reads them, and that
+    # scope grants write access too. A fine-grained token also reads the
+    # private repositories of only one resource owner, so private repositories
+    # under several owners need a classic token as well. It reads
+    # code-scanning alerts only on its resource owner's repositories, public
+    # ones included, so code scanning on another owner's public repositories
+    # needs a classic token too, or those repositories in security.skip_repos
+    # below. docs/configuration.md lists the permissions for every forge, and
+    # docs/configuration.md#choosing-a-github-token weighs the two GitHub
+    # tokens.
     token: ${GITHUB_TOKEN}
     # The users, organizations or GitLab groups whose repositories are scanned.
     owners: [your-login]
@@ -57,7 +65,9 @@ connections:
     exclude_repos: []
     # More exclude rules for this connection alone, after the top-level ones.
     exclude: []
-    # Logins counted as bots in the From column, beside any login ending in [bot].
+    # Logins counted as bots in the From column although the forge counts them
+    # as people, such as a self-hosted Renovate's user account. Accounts the
+    # forge marks as bots, such as GitHub Apps, count as bots already.
     bot_authors: []
     # Code-scanning alerts, read on GitHub only. Forks are skipped by default,
     # because a fork reports the alerts of the code it copied. Private

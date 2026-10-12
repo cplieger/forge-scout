@@ -51,7 +51,7 @@ func TestScan_a_cut_discovery_publishes_no_snapshot_read_through_it(t *testing.T
 		{Repo: "o/r", Number: 1, Author: "x", HeadSHA: "h1"}, {Repo: "o/b", Number: 2, Author: "x"},
 	}}
 	ep.conn.issues = map[string][]forge.Issue{"o": {{Repo: "o/b", Number: 3, Author: "x"}}}
-	ep.gh.alerts = map[string][]forge.Alert{"o/r": {{Repo: "o/r", Number: 4, Severity: "high", Tool: "CodeQL"}}}
+	ep.gh.alerts = map[string][]forge.Alert{"o/r": {{Repo: "o/r", Number: 4, SecuritySeverity: "high", Tool: "CodeQL"}}}
 	ep.gh.workflows = map[string][]forge.Workflow{"o/r": {{Repo: "o/r", Name: "nightly", State: "disabled_inactivity"}}}
 	var timedFailures []forge.Run
 	for i := range minDurationRuns {
@@ -74,7 +74,7 @@ func TestScan_a_cut_discovery_publishes_no_snapshot_read_through_it(t *testing.T
 	c := lineFor(t, h.rec, "scan complete", "gh")
 	for _, k := range []string{
 		"open_prs", "excluded_prs", "from_others_prs", "open_issues", "excluded_issues", "from_others_issues",
-		"open_age_lt7d", "idle_30d", "failing_checks_prs", "checks_unread", "security_alerts", "security_alerts_high",
+		"open_age_lt7d_prs", "open_age_lt7d_issues", "idle_30d_prs", "idle_30d_issues", "failing_checks_prs", "checks_unread", "security_alerts", "security_alerts_high",
 		"disabled_workflows", "failing_workflows", "failing_workflows_listed", "slow_workflows_listed", "run_durations_known",
 	} {
 		if v, ok := c[k]; ok {

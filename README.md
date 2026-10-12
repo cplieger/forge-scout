@@ -22,7 +22,7 @@ forge-scout shows you what is waiting for you across all your repositories and f
 
 forge-scout is built for people with repositories on one or more forges, private ones included: github.com or GitHub Enterprise Server, gitlab.com or a self-managed GitLab, and Gitea or Forgejo instances. It checks every repository of the owners you name every 15 minutes.
 
-forge-scout reports through its log, so its dashboard and alerts come from your Grafana, Loki and Alertmanager, which the [monitoring guide](https://github.com/cplieger/docs/blob/main/docs/monitoring.md#the-smallest-stack-sends-notifications-only) sets up. You also need a read-only access token for each forge.
+forge-scout reports through its log, so its dashboard and alerts come from your Grafana, Loki and Alertmanager, which the [monitoring guide](https://github.com/cplieger/docs/blob/main/docs/monitoring.md#the-smallest-stack-sends-notifications-only) sets up. You also need an access token for each forge, read-only where the forge allows it.
 
 Other tools suit other needs:
 
@@ -61,7 +61,7 @@ services:
       - "./data:/data"
 ```
 
-1. Create a read-only token on each forge, with the [permissions](docs/configuration.md#token-permissions) for that forge. On GitHub, use a classic token with the `repo` scope, which also reads pull request checks. A fine-grained token with read-only Actions, Contents, Commit statuses, Pull requests, Issues and Code scanning alerts works too, but GitHub gives it no permission for check runs, so the checks of pull requests on private repositories are not available with it.
+1. Create a token on each forge, with the [permissions](docs/configuration.md#token-permissions) for that forge. On GitHub, a fine-grained token with read-only Actions, Contents, Commit statuses, Pull requests, Issues and Code scanning alerts is the least access. GitHub offers fine-grained tokens no Checks permission, so the checks of pull requests on private repositories show as Not available with this token. Only a classic token with the `repo` scope reads them, and that scope grants write access too. A fine-grained token also reads the private repositories of only one resource owner, so private repositories under several owners need a classic token as well. It reads code-scanning alerts only on its resource owner's repositories, public ones included, so code scanning on another owner's public repositories needs a classic token too, or those repositories in `security.skip_repos`. [Choosing a GitHub token](docs/configuration.md#choosing-a-github-token) weighs the two.
 2. In the folder that holds `compose.yaml`, create a file named `.env` with one line per token, such as `GITHUB_TOKEN=github_pat_your_token`. If your user on the host is not uid 1000, also add `PUID=` and `PGID=` lines with your numbers from `id -u` and `id -g`.
 3. Save [`config.example.yaml`](config.example.yaml) beside `compose.yaml`, then run `mkdir -p config && cp config.example.yaml config/config.yaml`. In `config/config.yaml`, set each connection's `url` and `owners`, and delete the connections you do not use.
 4. Add each token variable the config names to the `environment:` block of `compose.yaml`.
@@ -104,7 +104,7 @@ Each connection takes these keys:
 | `owners` | required | The users, organizations or GitLab groups whose repositories are scanned |
 | `exclude_repos` | none | Full `owner/name` paths left out of every signal |
 | `exclude` | none | More rules like the top-level `exclude`, applied to this connection after those |
-| `bot_authors` | none | Logins shown as bots, beside any login ending in `[bot]` |
+| `bot_authors` | none | Logins shown as bots although the forge counts them as people, such as a self-hosted Renovate's user account |
 | `security` | `enabled: true`, `skip_forks: true`, `include_private: false` | `enabled`, `skip_forks`, `include_private` and `skip_repos` for code-scanning alerts |
 | `private_addresses` | `false` | Allow an instance on a private or loopback address |
 | `allow_plaintext` | `false` | Allow an `http://` address |
@@ -118,11 +118,11 @@ Pull requests, issues and CI runs are read on every forge. Code-scanning alerts 
 - On Gitea and Forgejo, the run listing has no time filter. forgeapi ends it at the first page whose runs were all created more than a minute before the listing's start, so a long run history costs one or two requests a scan. Gitea releases before 28 send no run creation time, so their runs are not read and the log says so once per scan.
 - Run durations need a start time from the forge. GitHub, Gitea and Forgejo send one. GitLab's pipeline list does not, so GitLab workflows never appear among the slowest workflows.
 - A GitLab owner that is a user and not a group has no owner-wide pull request or issue list. forge-scout then reads each of that user's projects, which costs two requests per project per scan.
-- A pull request's checks are read on GitHub and GitLab, one request per open pull request. GitHub refuses a fine-grained token the checks of a pull request on a private repository, and the dashboard shows them as Not available with this token. Gitea and Forgejo name no head commit in the cross-repository list, so their pull requests show no checks.
+- A pull request's checks are read on GitHub and GitLab, one request per open pull request. GitHub refuses a fine-grained token the checks of a pull request on a private repository, and the dashboard shows them as Not available with this token. Only a classic token with the `repo` scope reads them, as [Choosing a GitHub token](docs/configuration.md#choosing-a-github-token) explains. Gitea and Forgejo name no head commit in the cross-repository list, so their pull requests show no checks.
 
 ## Security
 
-forge-scout opens no port and runs no web server. It sends only read requests, and only to the forges you configure, so give it read-only tokens. Each token travels only in the request header to its own forge and never appears in the log, which records only whether a token is set. Keep `.env` out of git.
+forge-scout opens no port and runs no web server. It sends only read requests, and only to the forges you configure, so give it the least access each forge's token allows. Each token travels only in the request header to its own forge and never appears in the log, which records only whether a token is set. Keep `.env` out of git.
 
 forge-scout reads at most 8 MiB of each response body, on every forge and for its own GitHub code-scanning and workflow reads alike. A larger response fails that read, so a hostile or broken server cannot fill its memory. One repository's code-scanning alerts are held to 8 MiB too, across all their pages: past that, the repository's code-scanning read fails.
 

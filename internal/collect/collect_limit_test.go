@@ -342,7 +342,7 @@ func fullBurstHarness(t *testing.T) *harness {
 	gh.gh.workflows = map[string][]forge.Workflow{"o/r": {
 		{Repo: "o/r", Name: "CI", State: "active"}, {Repo: "o/r", Name: "nightly", State: "disabled_manually"},
 	}}
-	gh.gh.alerts = map[string][]forge.Alert{"o/r": {{Repo: "o/r", Number: 3, Rule: "rule", Severity: "high", Tool: "CodeQL"}}}
+	gh.gh.alerts = map[string][]forge.Alert{"o/r": {{Repo: "o/r", Number: 3, Rule: "rule", SecuritySeverity: "high", Tool: "CodeQL"}}}
 	gt.conn.issues = map[string][]forge.Issue{"o": {{Repo: "o/r", Number: 4, Author: "x"}}}
 	gt.conn.errs = map[string]error{"prs o": errors.New("listing failed")}
 	st.conn.errs = map[string]error{"runs o/r": forge.ErrRateLimited}

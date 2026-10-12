@@ -257,6 +257,21 @@ func TestWire_pr_head_and_checks(t *testing.T) {
 	}
 }
 
+func TestWire_a_github_app_author_reads_as_a_bot(t *testing.T) {
+	w := world()
+	w.Repos[0].PRs[0].Author, w.Repos[0].PRs[0].AuthorType = "tribble-trouble", "Bot"
+	w.Repos[0].Issues[0].AuthorType = "User"
+	c, _ := openFake(t, forgeconntest.GitHub, w)
+	prs, err := c.OpenPRs(t.Context(), "acme")
+	if err != nil || len(prs) != 1 || prs[0].Author != "tribble-trouble" || prs[0].AuthorKind != forge.AccountBot {
+		t.Errorf("OpenPRs over a GraphQL author {__typename: Bot, login: tribble-trouble} = %+v, %v, want the bot kind", prs, err)
+	}
+	issues, err := c.OpenIssues(t.Context(), "acme")
+	if err != nil || len(issues) != 1 || issues[0].AuthorKind != forge.AccountUser {
+		t.Errorf("OpenIssues over a GraphQL author of type User = %+v, %v, want the user kind", issues, err)
+	}
+}
+
 func TestWire_a_head_with_no_checks_reads_none(t *testing.T) {
 	for _, fake := range []forgeconntest.Product{forgeconntest.GitHub, forgeconntest.GitLab} {
 		t.Run(string(fake), func(t *testing.T) {
