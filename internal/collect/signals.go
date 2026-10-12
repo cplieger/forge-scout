@@ -352,7 +352,7 @@ func lessTool(a, b *toolCount) int {
 	return cmp.Or(cmp.Compare(b.alerts, a.alerts), cmp.Compare(a.tool, b.tool))
 }
 
-// toolCount is one tool's alerts across the scan; rollup marks the one row
+// toolCount is one tool's alerts on one connection; rollup marks the one row
 // folding every tool past the cap, which names no tool.
 type toolCount struct {
 	tool   string
@@ -360,17 +360,12 @@ type toolCount struct {
 	rollup bool
 }
 
-// tools is the scan's alert count per tool over every connection that
-// publishes its alerts: the ten with the most, then one rollup row.
-func tools(results []*connResult) []toolCount {
+// tools is r's alert count per tool: the ten with the most, then one rollup
+// row.
+func tools(r *connResult) []toolCount {
 	counts := map[string]int{}
-	for _, r := range results {
-		if r.ledger.stop != nil {
-			continue
-		}
-		for i := range r.alerts {
-			counts[r.alerts[i].Tool]++
-		}
+	for i := range r.alerts {
+		counts[r.alerts[i].Tool]++
 	}
 	out := make([]toolCount, 0, len(counts))
 	for t, n := range counts {

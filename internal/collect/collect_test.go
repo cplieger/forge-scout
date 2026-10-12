@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -72,6 +73,8 @@ type fakeQuota struct {
 	// remaining is the budget the next response reports, and least the
 	// lowest any reported.
 	remaining, least int
+	// noReset leaves X-RateLimit-Reset out of every response.
+	noReset bool
 }
 
 func newFakeQuota(clock func() time.Time, remaining int, reset time.Time) *fakeQuota {
@@ -97,7 +100,9 @@ func (q *fakeQuota) send(err error) error {
 	q.least = min(q.least, q.remaining)
 	h := http.Header{}
 	h.Set("X-RateLimit-Remaining", strconv.Itoa(q.remaining))
-	h.Set("X-RateLimit-Reset", strconv.FormatInt(q.reset.Unix(), 10))
+	if !q.noReset {
+		h.Set("X-RateLimit-Reset", strconv.FormatInt(q.reset.Unix(), 10))
+	}
 	answer := roundTrip(func(*http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: status, Header: h, Body: http.NoBody}, nil
 	})
@@ -1842,27 +1847,37 @@ func TestScan_alerts_and_tools_are_capped(t *testing.T) {
 	if n := h.rec.CountExact("top security alert"); n != 25 {
 		t.Errorf("top security alert lines = %d, want 25", n)
 	}
-	got := lines(h.rec, "security tool")
-	if len(got) != 11 {
-		t.Fatalf("security tool lines in one scan of three connections = %d, want 11 (10 and the rollup)", len(got))
+	byConn := map[string][]map[string]string{}
+	for _, l := range lines(h.rec, "security tool") {
+		byConn[l["connection"]] = append(byConn[l["connection"]], l)
 	}
-	total := 0
-	for i, l := range got {
-		n, _ := strconv.Atoi(l["alerts"])
-		total += n
-		if l["forge"] != "github" || l["connection"] != "" || l["rank"] != strconv.Itoa(i+1) {
-			t.Errorf("security tool line %d = %v, want forge github, no connection, rank %d", i, l, i+1)
+	for _, ep := range eps {
+		got := byConn[ep.cfg.Name]
+		if len(got) != 11 {
+			t.Errorf("security tool lines of %s = %d, want 11 (10 and the rollup)", ep.cfg.Name, len(got))
+			continue
 		}
-		if (l["rollup"] == "true") != (i == 10) {
-			t.Errorf("security tool line %d rollup = %s, want only the 11th line marked", i, l["rollup"])
+		total := 0
+		for i, l := range got {
+			n, _ := strconv.Atoi(l["alerts"])
+			total += n
+			if l["forge"] != "github" || l["rank"] != strconv.Itoa(i+1) || l["forge_rank"] != strconv.Itoa(i+1) {
+				t.Errorf("security tool line %d of %s = %v, want forge github, rank and forge_rank %d", i, ep.cfg.Name, l, i+1)
+			}
+			if (l["rollup"] == "true") != (i == 10) {
+				t.Errorf("security tool line %d of %s rollup = %s, want only the 11th line marked", i, ep.cfg.Name, l["rollup"])
+			}
+		}
+		if total != 400 {
+			t.Errorf("security tool alerts of %s sum to %d, want its 400 alerts", ep.cfg.Name, total)
 		}
 	}
-	if total != 1200 {
-		t.Errorf("security tool alerts sum = %d, want all 1200 alerts of the scan", total)
+	if len(byConn) != len(eps) {
+		t.Errorf("security tool lines name connections %v, want each of the %d connections", slices.Collect(maps.Keys(byConn)), len(eps))
 	}
 }
 
-func TestScan_security_tools_rank_across_connections_and_mark_the_rollup(t *testing.T) {
+func TestScan_security_tools_count_each_connection_apart(t *testing.T) {
 	a, b := githubEndpoint("a"), githubEndpoint("b")
 	var alerts []forge.Alert
 	add := func(tool string, n int) {
@@ -1880,28 +1895,25 @@ func TestScan_security_tools_rank_across_connections_and_mark_the_rollup(t *test
 	}}
 	h := newHarness(t, a, b)
 	h.scan(t)
-	got := lines(h.rec, "security tool")
-	if len(got) != 11 {
-		t.Fatalf("security tool lines = %d, want 11 for eleven tool names over two connections", len(got))
-	}
-	if got[0]["tool"] != "other" || got[0]["alerts"] != "50" || got[0]["rollup"] != "false" {
-		t.Errorf("first security tool line = %v, want the real tool named other, 50 alerts, not the rollup", got[0])
-	}
-	rollups, nine := 0, false
-	for _, l := range got {
-		nine = nine || (l["tool"] == "tool-9" && l["alerts"] == "13")
-		if l["rollup"] == "true" {
-			rollups++
-			if _, named := l["tool"]; named || l["alerts"] != "12" {
-				t.Errorf("rollup line = %v, want no tool name and tool-8's 12 alerts, last of the scan-wide ranking", l)
-			}
+	var ofA, ofB []map[string]string
+	for _, l := range lines(h.rec, "security tool") {
+		switch l["connection"] {
+		case "a":
+			ofA = append(ofA, l)
+		case "b":
+			ofB = append(ofB, l)
+		default:
+			t.Errorf("security tool line %v names connection %q, want a or b", l, l["connection"])
 		}
 	}
-	if !nine {
-		t.Errorf("security tool lines = %v, want tool-9 listed with 13 alerts summed over both connections", got)
+	if len(ofA) != 11 || ofA[0]["tool"] != "other" || ofA[0]["alerts"] != "50" || ofA[0]["rollup"] != "false" {
+		t.Fatalf("a's security tool lines = %v, want 11 led by the real tool named other with 50 alerts, not the rollup", ofA)
 	}
-	if rollups != 1 {
-		t.Errorf("rollup lines = %d, want exactly 1", rollups)
+	if roll := ofA[10]; roll["rollup"] != "true" || roll["alerts"] != "11" || roll["tool"] != "" {
+		t.Errorf("a's rollup line = %v, want no tool name and tool-9's 11 alerts, a's eleventh tool", roll)
+	}
+	if len(ofB) != 1 || ofB[0]["tool"] != "tool-9" || ofB[0]["alerts"] != "2" || ofB[0]["rank"] != "1" || ofB[0]["rollup"] != "false" {
+		t.Errorf("b's security tool lines = %v, want one line, tool-9 with b's own 2 alerts at rank 1", ofB)
 	}
 }
 
@@ -2653,7 +2665,7 @@ func TestScan_security_lines_rank_across_connections(t *testing.T) {
 	b.gh.alerts = map[string][]forge.Alert{"o/r": {{Repo: "o/r", Number: 3, SecuritySeverity: "critical", Tool: "CodeQL"}}}
 	h := newHarness(t, a, b)
 	h.scan(t)
-	for _, msg := range []string{"security alert", "top security alert", "security tool"} {
+	for _, msg := range []string{"security alert", "top security alert"} {
 		got := lines(h.rec, msg)
 		ranks := map[string]bool{}
 		for _, l := range got {
@@ -2671,8 +2683,9 @@ func TestScan_security_lines_rank_across_connections(t *testing.T) {
 	if l := lines(h.rec, "security alert"); len(l) != 3 || l[0]["connection"] != "b" || l[0]["rank"] != "1" {
 		t.Errorf("security alert lines = %v, want b's critical alert first of 3", l)
 	}
-	if l := lines(h.rec, "security tool"); len(l) != 2 || l[0]["tool"] != "Trivy" || l[0]["rank"] != "1" || l[1]["rank"] != "2" {
-		t.Errorf("security tool lines = %v, want a's Trivy (2 alerts) at rank 1 and b's CodeQL at rank 2", l)
+	if l := lines(h.rec, "security tool"); len(l) != 2 || l[0]["connection"] != "a" || l[0]["tool"] != "Trivy" || l[0]["rank"] != "1" ||
+		l[1]["connection"] != "b" || l[1]["tool"] != "CodeQL" || l[1]["rank"] != "1" {
+		t.Errorf("security tool lines = %v, want a's Trivy (2 alerts) and b's CodeQL each at rank 1 of its connection", l)
 	}
 }
 
