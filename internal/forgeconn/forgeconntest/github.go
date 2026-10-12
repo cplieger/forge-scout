@@ -269,6 +269,14 @@ func rollupRefusal(path ...any) map[string]any {
 	}
 }
 
+func githubAuthor(it *Item) map[string]any {
+	author := map[string]any{"login": it.Author}
+	if it.AuthorType != "" {
+		author["__typename"] = it.AuthorType
+	}
+	return author
+}
+
 func (s *Server) githubSearchNode(repo *Repo, it *Item, pr bool) map[string]any {
 	kind, path := "Issue", "/issues/"
 	if pr {
@@ -278,7 +286,7 @@ func (s *Server) githubSearchNode(repo *Repo, it *Item, pr bool) map[string]any 
 		"__typename": kind, "number": it.Number, "title": it.Title, "body": "", "state": "OPEN",
 		"url":       webURL(s.URL, s.fullName(repo)+path+itoa(it.Number)),
 		"createdAt": stamp(it.Created), "updatedAt": stamp(it.Updated),
-		"author":     map[string]any{"login": it.Author},
+		"author":     githubAuthor(it),
 		"labels":     map[string]any{"totalCount": len(it.Labels), "nodes": labelObjects(it.Labels, "ededed")},
 		"repository": map[string]any{"nameWithOwner": s.fullName(repo)},
 	}

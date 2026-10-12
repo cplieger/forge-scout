@@ -36,7 +36,7 @@ func readStateEndpoint() *endpoint {
 	ep.conn.issues = map[string][]forge.Issue{"o": {{Repo: "o/r", Number: 2, Author: "x"}}}
 	ep.conn.runs = map[string]listing{"o/r": {Runs: []forge.Run{run(1, forge.RunFailing, now.Add(-time.Hour))}}}
 	ep.conn.checks = map[string]forge.CheckResult{"h1": {State: "passing"}}
-	ep.gh.alerts = map[string][]forge.Alert{"o/r": {{Repo: "o/r", Number: 3, Severity: "high", Tool: "CodeQL"}}}
+	ep.gh.alerts = map[string][]forge.Alert{"o/r": {{Repo: "o/r", Number: 3, SecuritySeverity: "high", Tool: "CodeQL"}}}
 	ep.gh.workflows = map[string][]forge.Workflow{"o/r": {
 		{Repo: "o/r", Name: "CI", State: "active"}, {Repo: "o/r", Name: "nightly", State: "disabled_manually"},
 	}}

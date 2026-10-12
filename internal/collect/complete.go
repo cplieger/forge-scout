@@ -39,14 +39,16 @@ func completeAttrs(sc *scan, r *connResult, b *burst) []slog.Attr {
 }
 
 // workAttrs counts open pull requests and issues, with their age and origin.
+// Each family's counts follow its own read, so a withheld issue list never
+// hides the pull request counts.
 func workAttrs(sc *scan, r *connResult) []slog.Attr {
 	l := &r.ledger
-	var ages ageBuckets
+	var prAges, issueAges ageBuckets
 	othersPRs, othersIssues, failingChecks := 0, 0, 0
 	for i := range r.prs {
 		pr := &r.prs[i].pr
-		ages.add(sc.start, pr.CreatedAt, pr.UpdatedAt)
-		if from(r, pr.Author) == fromOthers {
+		prAges.add(sc.start, pr.CreatedAt, pr.UpdatedAt)
+		if from(r, pr.Author, pr.AuthorKind) == fromOthers {
 			othersPRs++
 		}
 		if r.prs[i].checks == forge.CheckFailing {
@@ -55,26 +57,21 @@ func workAttrs(sc *scan, r *connResult) []slog.Attr {
 	}
 	for i := range r.issues {
 		is := &r.issues[i].issue
-		ages.add(sc.start, is.CreatedAt, is.UpdatedAt)
-		if from(r, is.Author) == fromOthers {
+		issueAges.add(sc.start, is.CreatedAt, is.UpdatedAt)
+		if from(r, is.Author, is.AuthorKind) == fromOthers {
 			othersIssues++
 		}
 	}
-	prsShown, issuesShown := !l.withheld(famPRs), !l.withheld(famIssues)
 	var attrs []slog.Attr
-	if prsShown {
+	if !l.withheld(famPRs) {
 		attrs = append(attrs, slog.Int("open_prs", len(r.prs)), slog.Int("excluded_prs", l.fam[famPRs].drops[dropExcludedItem]),
 			slog.Int("from_others_prs", othersPRs))
+		attrs = append(attrs, prAges.attrs("_prs")...)
 	}
-	if issuesShown {
+	if !l.withheld(famIssues) {
 		attrs = append(attrs, slog.Int("open_issues", len(r.issues)), slog.Int("excluded_issues", l.fam[famIssues].drops[dropExcludedItem]),
 			slog.Int("from_others_issues", othersIssues))
-	}
-	if prsShown && issuesShown {
-		attrs = append(attrs,
-			slog.Int("open_age_lt7d", ages.lt7), slog.Int("open_age_7_30d", ages.d7to30), slog.Int("open_age_30_90d", ages.d30to90),
-			slog.Int("open_age_90d_plus", ages.d90plus), slog.Int("open_age_unknown", ages.ageUnknown),
-			slog.Int("idle_30d", ages.idle30), slog.Int("idle_unknown", ages.idleUnknown))
+		attrs = append(attrs, issueAges.attrs("_issues")...)
 	}
 	return append(attrs, checksAttrs(r, failingChecks)...)
 }
@@ -129,7 +126,7 @@ func workflowAttrs(r *connResult, b *burst) []slog.Attr {
 
 func securityAttrs(r *connResult, b *burst) []slog.Attr {
 	fl := &r.ledger.fam[famSecurity]
-	attrs := make([]slog.Attr, 0, 13)
+	attrs := make([]slog.Attr, 0, 8+len(severityBuckets))
 	attrs = append(attrs,
 		slog.Int("security_repos_read", fl.read()), slog.Int("security_skipped", fl.drops[dropSecuritySkipped]),
 		slog.Int("security_unavailable", fl.noData), slog.Int("security_unreadable", fl.drops[dropFailed]),
@@ -140,12 +137,11 @@ func securityAttrs(r *connResult, b *burst) []slog.Attr {
 	}
 	bySeverity := map[string]int{}
 	for i := range r.alerts {
-		bySeverity[severityBucket(r.alerts[i].Severity)]++
+		bySeverity[severityBucket(&r.alerts[i])]++
 	}
-	return append(attrs,
-		slog.Int("security_alerts", len(r.alerts)), slog.Int("security_alerts_listed", b.topAlerts[r]),
-		slog.Int("security_alerts_critical", bySeverity["critical"]), slog.Int("security_alerts_high", bySeverity["high"]),
-		slog.Int("security_alerts_medium", bySeverity["medium"]), slog.Int("security_alerts_low", bySeverity["low"]),
-		slog.Int("security_alerts_unrated", bySeverity["unrated"]),
-	)
+	attrs = append(attrs, slog.Int("security_alerts", len(r.alerts)), slog.Int("security_alerts_listed", b.topAlerts[r]))
+	for _, s := range severityBuckets {
+		attrs = append(attrs, slog.Int("security_alerts_"+s, bySeverity[s]))
+	}
+	return attrs
 }

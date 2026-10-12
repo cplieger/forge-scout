@@ -511,7 +511,7 @@ func (c *Client) prsOf(rows []forgeapi.PullRequest) ([]forge.PullRequest, error)
 			CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt, Repo: r.Repo.DisplayPath,
 			Ref: refOf(r.Ref.Sigil, r.Ref.Number), Title: r.Title, Author: r.Author, URL: r.WebURL,
 			HeadSHA: r.HeadSHA, Labels: labelNames(r.Labels), Number: r.Ref.Number, Draft: r.Draft,
-			ChecksRefused: refused(r.Partial),
+			ChecksRefused: refused(r.Partial), AuthorKind: accountKind(r.AuthorKind),
 		}
 		pr.SetRepoHandle(r.Repo)
 		out = append(out, pr)
@@ -526,10 +526,20 @@ func issuesOf(rows []forgeapi.Issue) []forge.Issue {
 		out = append(out, forge.Issue{
 			CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt, Repo: r.Repo.DisplayPath,
 			Ref: refOf("#", r.Ref.Number), Title: r.Title, Author: r.Author, URL: r.WebURL,
-			Labels: labelNames(r.Labels), Number: r.Ref.Number,
+			Labels: labelNames(r.Labels), Number: r.Ref.Number, AuthorKind: accountKind(r.AuthorKind),
 		})
 	}
 	return out
+}
+
+func accountKind(k forgeapi.AccountKind) forge.AccountKind {
+	switch k {
+	case forgeapi.AccountKindUser:
+		return forge.AccountUser
+	case forgeapi.AccountKindBot:
+		return forge.AccountBot
+	}
+	return forge.AccountUnknown
 }
 
 func refOf(sigil string, n int) string { return cmp.Or(sigil, "#") + strconv.Itoa(n) }

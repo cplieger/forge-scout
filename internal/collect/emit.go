@@ -197,7 +197,7 @@ func emitPR(sc *scan, now time.Time, row ranked[prRow]) {
 	l.text("ref", pr.Ref)
 	l.text("title", pr.Title)
 	l.text("author", pr.Author)
-	l.add(slog.String("from", from(row.r, pr.Author)), slog.Bool("draft", pr.Draft))
+	l.add(slog.String("from", from(row.r, pr.Author, pr.AuthorKind)), slog.Bool("draft", pr.Draft))
 	l.text("labels", strings.Join(pr.Labels, ","))
 	if row.row.checks != "" {
 		l.add(slog.String("checks", string(row.row.checks)))
@@ -215,7 +215,7 @@ func emitIssue(sc *scan, now time.Time, row ranked[issueRow]) {
 	l.text("ref", is.Ref)
 	l.text("title", is.Title)
 	l.text("author", is.Author)
-	l.add(slog.String("from", from(row.r, is.Author)))
+	l.add(slog.String("from", from(row.r, is.Author, is.AuthorKind)))
 	l.text("labels", strings.Join(is.Labels, ","))
 	l.link(is.URL)
 	l.add(itemTimeAttrs(now, is.CreatedAt, is.UpdatedAt)...)
@@ -304,7 +304,8 @@ func alertAttrs(l *lineAttrs, a *forge.Alert) []slog.Attr {
 	l.text("repo", a.Repo)
 	l.add(slog.String("source", a.Source), slog.Int64("number", a.Number))
 	l.text("rule", a.Rule)
-	l.text("severity", a.Severity)
+	l.text("security_severity", a.SecuritySeverity)
+	l.text("problem_severity", a.ProblemSeverity)
 	l.text("tool", a.Tool)
 	l.link(a.URL)
 	if !a.CreatedAt.IsZero() {

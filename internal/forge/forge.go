@@ -134,7 +134,19 @@ type PullRequest struct {
 	// ChecksRefused reports a row whose checks the forge refused to the
 	// token, which a checks read answers CheckUnreadable without a request.
 	ChecksRefused bool
+	// AuthorKind is what kind of account Author is, as the forge says.
+	AuthorKind AccountKind
 }
+
+// AccountKind is what kind of account authored an item.
+type AccountKind int
+
+// The account kinds; AccountUnknown is a forge that does not say.
+const (
+	AccountUnknown AccountKind = iota
+	AccountUser
+	AccountBot
+)
 
 // SetRepoHandle records the adapter's opaque address for pr's repository,
 // which a checks read addresses.
@@ -154,6 +166,8 @@ type Issue struct {
 	URL       string
 	Labels    []string
 	Number    int
+	// AuthorKind is what kind of account Author is, as the forge says.
+	AuthorKind AccountKind
 }
 
 // Alert is one open security alert.
@@ -161,12 +175,17 @@ type Alert struct {
 	CreatedAt time.Time
 	Repo      string
 	// Source names the scanner family: code_scanning.
-	Source   string
-	Rule     string
-	Severity string
-	Tool     string
-	URL      string
-	Number   int64
+	Source string
+	Rule   string
+	// SecuritySeverity is low, medium, high or critical, unknown for a value
+	// GitHub does not document, or empty where the rule sets none.
+	SecuritySeverity string
+	// ProblemSeverity is none, note, warning or error, unknown for a value
+	// GitHub does not document, or empty where the rule sets none.
+	ProblemSeverity string
+	Tool            string
+	URL             string
+	Number          int64
 }
 
 // Workflow is one workflow definition (GitHub only).

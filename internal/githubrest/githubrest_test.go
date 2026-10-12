@@ -58,7 +58,7 @@ func alertsPage(from, n int) string {
 			b.WriteString(",")
 		}
 		fmt.Fprintf(&b, `{"number":%d,"created_at":"2026-10-01T00:00:00Z","html_url":"https://github.com/o/r/security/code-scanning/%d",`+
-			`"rule":{"id":"go/rule","description":"desc","security_severity_level":"high"},"tool":{"name":"CodeQL"}}`, from+i, from+i)
+			`"rule":{"id":"go/rule","description":"desc","severity":"warning","security_severity_level":"high"},"tool":{"name":"CodeQL"}}`, from+i, from+i)
 	}
 	b.WriteString("]")
 	return b.String()
@@ -77,7 +77,7 @@ func TestCodeScanningAlerts_reads_and_maps_alerts(t *testing.T) {
 	}
 	want := forge.Alert{
 		CreatedAt: time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC), Repo: "o/r", Source: "code_scanning", Rule: "go/rule",
-		Severity: "high", Tool: "CodeQL", URL: "https://github.com/o/r/security/code-scanning/1", Number: 1,
+		SecuritySeverity: "high", ProblemSeverity: "warning", Tool: "CodeQL", URL: "https://github.com/o/r/security/code-scanning/1", Number: 1,
 	}
 	if got.Rows[0] != want {
 		t.Errorf("CodeScanningAlerts row = %+v, want %+v", got.Rows[0], want)
@@ -87,6 +87,41 @@ func TestCodeScanningAlerts_reads_and_maps_alerts(t *testing.T) {
 	}
 	if gotPath != "/repos/o/r/code-scanning/alerts" || !strings.Contains(gotQuery, "state=open") || !strings.Contains(gotQuery, "per_page=100") {
 		t.Errorf("request = %s?%s, want the open alerts at 100 a page", gotPath, gotQuery)
+	}
+}
+
+func TestDecodeAlerts_maps_both_severities_and_names_an_unknown_one(t *testing.T) {
+	// GitHub's alert rule summary: severity is none, note, warning or error,
+	// security_severity_level low, medium, high or critical, each nullable
+	// (https://docs.github.com/en/rest/code-scanning/code-scanning#list-code-scanning-alerts-for-a-repository).
+	cases := []struct {
+		name, rule, security, problem string
+	}{
+		{"no security severity, as a linter sets", `"severity":"error","security_severity_level":null`, "", "error"},
+		{"both set", `"severity":"warning","security_severity_level":"critical"`, "critical", "warning"},
+		{"neither set", `"severity":null,"security_severity_level":null`, "", ""},
+		{"neither sent", ``, "", ""},
+		{"none is a value", `"severity":"none"`, "", "none"},
+		{"note", `"severity":"note"`, "", "note"},
+		{"case folded", `"severity":"Error","security_severity_level":"HIGH"`, "high", "error"},
+		{"an unknown problem severity", `"severity":"fatal"`, "", "unknown"},
+		{"an unknown security severity", `"security_severity_level":"informational"`, "unknown", ""},
+		{"a long unknown value", `"severity":"` + strings.Repeat("x", 4096) + `"`, "", "unknown"},
+	}
+	for _, tc := range cases {
+		t.Run(strings.ReplaceAll(tc.name, " ", "_"), func(t *testing.T) {
+			rule := `"id":"r"`
+			if tc.rule != "" {
+				rule += "," + tc.rule
+			}
+			rows, err := decodeAlerts("o/r", []byte(`[{"number":1,"rule":{`+rule+`},"tool":{"name":"deadset"}}]`))
+			if err != nil || len(rows) != 1 {
+				t.Fatalf("decodeAlerts(%s) = %v, %v, want one alert", tc.rule, rows, err)
+			}
+			if rows[0].SecuritySeverity != tc.security || rows[0].ProblemSeverity != tc.problem {
+				t.Errorf("decodeAlerts(%.80s) severities = %q, %q, want %q, %q", tc.rule, rows[0].SecuritySeverity, rows[0].ProblemSeverity, tc.security, tc.problem)
+			}
+		})
 	}
 }
 

@@ -247,8 +247,8 @@
         "kind": "Panel",
         "spec": {
           "id": 12,
-          "title": "From other people",
-          "description": "Open pull requests and issues someone other than you or a bot opened, summed over each connection's newest scan. The tile turns blue at 1 to show someone may be waiting on a reply, not a fault. It reads No whole count in the newest scan when a selected connection's newest scan did not read it whole, stopped before counting or had no known forge, so narrow the Forge filter.",
+          "title": "PRs from other people",
+          "description": "Open pull requests someone other than you or a bot opened, summed over each connection's newest scan. The tile turns blue at 1 to show someone may be waiting on a reply, not a fault. It reads No whole count in the newest scan when a selected connection's newest scan did not read it whole, stopped before counting or had no known forge, so narrow the Forge filter.",
           "links": [],
           "data": {
             "kind": "QueryGroup",
@@ -265,7 +265,7 @@
                         "name": "${datasource}"
                       },
                       "spec": {
-                        "expr": "sum(last_over_time({container=\"forge-scout\"} |= `scan ` | json msg=\"msg\", forge=\"forge\", connection=\"connection\", from_others_prs=\"from_others_prs\", open_prs_read=\"open_prs_read\" | msg=`scan complete` or msg=`scan stopped` | forge=~\"$forge\" | label_format from_others_prs=`{{ if and (eq .open_prs_read \"complete\") .from_others_prs }}{{ .from_others_prs }}{{ else if or (eq .open_prs_read \"unsupported\") (eq .open_prs_read \"excluded\") }}{{ else }}NaN{{ end }}` | keep connection, from_others_prs | unwrap from_others_prs | __error__=\"\" [$__range]) by (connection)) + sum(last_over_time({container=\"forge-scout\"} |= `scan ` | json msg=\"msg\", forge=\"forge\", connection=\"connection\", from_others_issues=\"from_others_issues\", open_issues_read=\"open_issues_read\" | msg=`scan complete` or msg=`scan stopped` | forge=~\"$forge\" | label_format from_others_issues=`{{ if and (eq .open_issues_read \"complete\") .from_others_issues }}{{ .from_others_issues }}{{ else if or (eq .open_issues_read \"unsupported\") (eq .open_issues_read \"excluded\") }}{{ else }}NaN{{ end }}` | keep connection, from_others_issues | unwrap from_others_issues | __error__=\"\" [$__range]) by (connection))",
+                        "expr": "sum(last_over_time({container=\"forge-scout\"} |= `scan ` | json msg=\"msg\", forge=\"forge\", connection=\"connection\", from_others_prs=\"from_others_prs\", open_prs_read=\"open_prs_read\" | msg=`scan complete` or msg=`scan stopped` | forge=~\"$forge\" | label_format from_others_prs=`{{ if and (eq .open_prs_read \"complete\") .from_others_prs }}{{ .from_others_prs }}{{ else if or (eq .open_prs_read \"unsupported\") (eq .open_prs_read \"excluded\") }}{{ else }}NaN{{ end }}` | keep connection, from_others_prs | unwrap from_others_prs | __error__=\"\" [$__range]) by (connection))",
                         "queryType": "instant"
                       }
                     },
@@ -994,6 +994,111 @@
           }
         }
       },
+      "panel-18": {
+        "kind": "Panel",
+        "spec": {
+          "id": 18,
+          "title": "Issues from other people",
+          "description": "Open issues someone other than you or a bot opened, summed over each connection's newest scan. The tile turns blue at 1 to show someone may be waiting on a reply, not a fault. It reads No whole count in the newest scan when a selected connection's newest scan did not read it whole, stopped before counting or had no known forge, so narrow the Forge filter.",
+          "links": [],
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "loki",
+                      "version": "v0",
+                      "datasource": {
+                        "name": "${datasource}"
+                      },
+                      "spec": {
+                        "expr": "sum(last_over_time({container=\"forge-scout\"} |= `scan ` | json msg=\"msg\", forge=\"forge\", connection=\"connection\", from_others_issues=\"from_others_issues\", open_issues_read=\"open_issues_read\" | msg=`scan complete` or msg=`scan stopped` | forge=~\"$forge\" | label_format from_others_issues=`{{ if and (eq .open_issues_read \"complete\") .from_others_issues }}{{ .from_others_issues }}{{ else if or (eq .open_issues_read \"unsupported\") (eq .open_issues_read \"excluded\") }}{{ else }}NaN{{ end }}` | keep connection, from_others_issues | unwrap from_others_issues | __error__=\"\" [$__range]) by (connection))",
+                        "queryType": "instant"
+                      }
+                    },
+                    "refId": "A",
+                    "hidden": false
+                  }
+                }
+              ],
+              "transformations": [],
+              "queryOptions": {}
+            }
+          },
+          "vizConfig": {
+            "kind": "VizConfig",
+            "group": "stat",
+            "version": "",
+            "spec": {
+              "options": {
+                "colorMode": "value",
+                "graphMode": "none",
+                "justifyMode": "center",
+                "orientation": "auto",
+                "textMode": "value",
+                "wideLayout": true,
+                "showPercentChange": false,
+                "text": {
+                  "titleSize": 14,
+                  "valueSize": 28
+                },
+                "reduceOptions": {
+                  "calcs": [
+                    "last"
+                  ],
+                  "fields": "",
+                  "values": false
+                }
+              },
+              "fieldConfig": {
+                "defaults": {
+                  "unit": "short",
+                  "decimals": 0,
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "value": null,
+                        "color": "text"
+                      },
+                      {
+                        "value": 0,
+                        "color": "green"
+                      },
+                      {
+                        "value": 1,
+                        "color": "blue"
+                      }
+                    ]
+                  },
+                  "color": {
+                    "mode": "thresholds"
+                  },
+                  "noValue": "No scan in this range",
+                  "mappings": [
+                    {
+                      "type": "special",
+                      "options": {
+                        "match": "nan",
+                        "result": {
+                          "index": 0,
+                          "text": "No whole count in the newest scan",
+                          "color": "yellow"
+                        }
+                      }
+                    }
+                  ]
+                },
+                "overrides": []
+              }
+            }
+          }
+        }
+      },
       "panel-20": {
         "kind": "Panel",
         "spec": {
@@ -1596,7 +1701,7 @@
         "spec": {
           "id": 22,
           "title": "Open pull requests, idlest first",
-          "description": "Open pull requests with the oldest last activity first, up to 10 per forge. From says who opened it, and Checks is the verdict of its head commit, absent on Gitea and Forgejo. Checks reads Not available with this token where GitHub refuses the token a pull request's checks. The Open work tab lists more of them.",
+          "description": "Open pull requests with the oldest last activity first, up to 10 per forge. From says who opened it, and Checks is the verdict of its head commit, absent on Gitea and Forgejo. Checks reads Not available with this token where GitHub refuses the token a pull request's checks, which only a classic token with the repo scope can read, since fine-grained tokens have no Checks permission. The Open work tab lists more of them.",
           "links": [],
           "data": {
             "kind": "QueryGroup",
@@ -2229,7 +2334,7 @@
         "spec": {
           "id": 24,
           "title": "Most severe open alerts",
-          "description": "Open code scanning alerts, critical first and then oldest, up to 10, each rule linked to its alert. Code scanning is read on GitHub only, so this row shows only while a selected connection read it in the time range. The Security alerts tab lists more of them.",
+          "description": "Open code scanning alerts, most severe first and then oldest, up to 10, each rule linked to its alert. Code scanning is read on GitHub only, so this row shows only while a selected connection read it in the time range, and the Security alerts tab lists more of them. Severity shows the security severity or, for an alert with none, its problem severity, which ranks after every alert that has one. Unrated is an alert whose security severity GitHub does not document, or that has none and no problem severity of error, warning or note.",
           "links": [],
           "data": {
             "kind": "QueryGroup",
@@ -2266,7 +2371,7 @@
                         "name": "${datasource}"
                       },
                       "spec": {
-                        "expr": "{container=\"forge-scout\"} |= `top security alert` | json msg=\"msg\", forge=\"forge\", scan_id=\"scan_id\", forge_rank=\"forge_rank\", connection=\"connection\", repo=\"repo\", severity=\"severity\", rule=\"rule\", tool=\"tool\", url=\"url\", created_at=\"created_at\" | msg=`top security alert` | forge=~\"$forge\" | forge_rank <= 10 | label_format repo=`{{ if eq .connection \"$connections\" }}{{ .repo }}{{ else }}{{ .repo }} on {{ .connection }}{{ end }}` | label_format link=`{{ if eq .forge \"github\" }}Open on GitHub{{ else if eq .forge \"gitlab\" }}Open on GitLab{{ else if eq .forge \"gitea\" }}Open on Gitea{{ else }}Open on Forgejo{{ end }}`",
+                        "expr": "{container=\"forge-scout\"} |= `top security alert` | json msg=\"msg\", forge=\"forge\", scan_id=\"scan_id\", forge_rank=\"forge_rank\", connection=\"connection\", repo=\"repo\", security_severity=\"security_severity\", problem_severity=\"problem_severity\", rule=\"rule\", tool=\"tool\", url=\"url\", created_at=\"created_at\" | msg=`top security alert` | forge=~\"$forge\" | forge_rank <= 10 | label_format severity=`{{ if or (eq .security_severity \"critical\") (eq .security_severity \"high\") (eq .security_severity \"medium\") (eq .security_severity \"low\") }}{{ .security_severity }}{{ else if and (not .security_severity) (or (eq .problem_severity \"error\") (eq .problem_severity \"warning\") (eq .problem_severity \"note\")) }}unrated_{{ .problem_severity }}{{ else }}unrated{{ end }}` | label_format repo=`{{ if eq .connection \"$connections\" }}{{ .repo }}{{ else }}{{ .repo }} on {{ .connection }}{{ end }}` | label_format link=`{{ if eq .forge \"github\" }}Open on GitHub{{ else if eq .forge \"gitlab\" }}Open on GitLab{{ else if eq .forge \"gitea\" }}Open on Gitea{{ else }}Open on Forgejo{{ end }}`",
                         "queryType": "range",
                         "maxLines": 81
                       }
@@ -2411,7 +2516,7 @@
                       },
                       {
                         "id": "custom.width",
-                        "value": 120
+                        "value": 224
                       },
                       {
                         "id": "mappings",
@@ -2439,8 +2544,23 @@
                                 "text": "Low",
                                 "color": "yellow"
                               },
-                              "unrated": {
+                              "unrated_error": {
                                 "index": 4,
+                                "text": "Error, no security severity",
+                                "color": "purple"
+                              },
+                              "unrated_warning": {
+                                "index": 5,
+                                "text": "Warning, no security severity",
+                                "color": "blue"
+                              },
+                              "unrated_note": {
+                                "index": 6,
+                                "text": "Note, no security severity",
+                                "color": "light-blue"
+                              },
+                              "unrated": {
+                                "index": 7,
                                 "text": "Unrated",
                                 "color": "text"
                               }
@@ -4950,8 +5070,8 @@
         "kind": "Panel",
         "spec": {
           "id": 40,
-          "title": "Untouched for 30 days or more",
-          "description": "Open pull requests and issues with no activity for 30 days or more, summed over each connection's newest scan. The tile turns yellow at 1, a prompt to close, label or nudge them. The age chart below shows the trend. It reads No whole count in the newest scan when a selected connection's newest scan did not read it whole, stopped before counting or had no known forge, so narrow the Forge filter.",
+          "title": "PRs untouched for 30+ days",
+          "description": "Open pull requests with no activity for 30 days or more, summed over each connection's newest scan. The tile turns yellow at 1, a prompt to close, label or nudge them. The pull requests age chart under Backlog shows the trend. It reads No whole count in the newest scan when a selected connection's newest scan did not read it whole, stopped before counting or had no known forge, so narrow the Forge filter.",
           "links": [],
           "data": {
             "kind": "QueryGroup",
@@ -4968,7 +5088,7 @@
                         "name": "${datasource}"
                       },
                       "spec": {
-                        "expr": "sum(last_over_time({container=\"forge-scout\"} |= `scan ` | json msg=\"msg\", forge=\"forge\", connection=\"connection\", idle_30d=\"idle_30d\", open_prs_read=\"open_prs_read\", open_issues_read=\"open_issues_read\" | msg=`scan complete` or msg=`scan stopped` | forge=~\"$forge\" | label_format idle_30d=`{{ if and (eq .open_prs_read \"complete\") (eq .open_issues_read \"complete\") .idle_30d }}{{ .idle_30d }}{{ else if or (eq .open_prs_read \"unsupported\") (eq .open_prs_read \"excluded\") (eq .open_issues_read \"unsupported\") (eq .open_issues_read \"excluded\") }}{{ else }}NaN{{ end }}` | keep connection, idle_30d | unwrap idle_30d | __error__=\"\" [$__range]) by (connection))",
+                        "expr": "sum(last_over_time({container=\"forge-scout\"} |= `scan ` | json msg=\"msg\", forge=\"forge\", connection=\"connection\", idle_30d_prs=\"idle_30d_prs\", open_prs_read=\"open_prs_read\" | msg=`scan complete` or msg=`scan stopped` | forge=~\"$forge\" | label_format idle_30d_prs=`{{ if and (eq .open_prs_read \"complete\") .idle_30d_prs }}{{ .idle_30d_prs }}{{ else if or (eq .open_prs_read \"unsupported\") (eq .open_prs_read \"excluded\") }}{{ else }}NaN{{ end }}` | keep connection, idle_30d_prs | unwrap idle_30d_prs | __error__=\"\" [$__range]) by (connection))",
                         "queryType": "instant"
                       }
                     },
@@ -5055,8 +5175,8 @@
         "kind": "Panel",
         "spec": {
           "id": 41,
-          "title": "Opened in the last 7 days",
-          "description": "Open pull requests and issues created in the last 7 days, summed over each connection's newest scan. It counts new work that is still open, not everything opened this week. It reads No whole count in the newest scan when a selected connection's newest scan did not read it whole, stopped before counting or had no known forge, so narrow the Forge filter.",
+          "title": "PRs opened in last 7 days",
+          "description": "Open pull requests created in the last 7 days, summed over each connection's newest scan. It counts new pull requests that are still open, not every one opened this week. It reads No whole count in the newest scan when a selected connection's newest scan did not read it whole, stopped before counting or had no known forge, so narrow the Forge filter.",
           "links": [],
           "data": {
             "kind": "QueryGroup",
@@ -5073,7 +5193,7 @@
                         "name": "${datasource}"
                       },
                       "spec": {
-                        "expr": "sum(last_over_time({container=\"forge-scout\"} |= `scan ` | json msg=\"msg\", forge=\"forge\", connection=\"connection\", open_age_lt7d=\"open_age_lt7d\", open_prs_read=\"open_prs_read\", open_issues_read=\"open_issues_read\" | msg=`scan complete` or msg=`scan stopped` | forge=~\"$forge\" | label_format open_age_lt7d=`{{ if and (eq .open_prs_read \"complete\") (eq .open_issues_read \"complete\") .open_age_lt7d }}{{ .open_age_lt7d }}{{ else if or (eq .open_prs_read \"unsupported\") (eq .open_prs_read \"excluded\") (eq .open_issues_read \"unsupported\") (eq .open_issues_read \"excluded\") }}{{ else }}NaN{{ end }}` | keep connection, open_age_lt7d | unwrap open_age_lt7d | __error__=\"\" [$__range]) by (connection))",
+                        "expr": "sum(last_over_time({container=\"forge-scout\"} |= `scan ` | json msg=\"msg\", forge=\"forge\", connection=\"connection\", open_age_lt7d_prs=\"open_age_lt7d_prs\", open_prs_read=\"open_prs_read\" | msg=`scan complete` or msg=`scan stopped` | forge=~\"$forge\" | label_format open_age_lt7d_prs=`{{ if and (eq .open_prs_read \"complete\") .open_age_lt7d_prs }}{{ .open_age_lt7d_prs }}{{ else if or (eq .open_prs_read \"unsupported\") (eq .open_prs_read \"excluded\") }}{{ else }}NaN{{ end }}` | keep connection, open_age_lt7d_prs | unwrap open_age_lt7d_prs | __error__=\"\" [$__range]) by (connection))",
                         "queryType": "instant"
                       }
                     },
@@ -5152,8 +5272,8 @@
         "kind": "Panel",
         "spec": {
           "id": 42,
-          "title": "Open for 90 days or more",
-          "description": "Open pull requests and issues created 90 days ago or more, summed over each connection's newest scan. Old open work is often stale and worth closing. It reads No whole count in the newest scan when a selected connection's newest scan did not read it whole, stopped before counting or had no known forge, so narrow the Forge filter.",
+          "title": "PRs open for 90+ days",
+          "description": "Open pull requests created 90 days ago or more, summed over each connection's newest scan. It reads No whole count in the newest scan when a selected connection's newest scan did not read it whole, stopped before counting or had no known forge, so narrow the Forge filter.",
           "links": [],
           "data": {
             "kind": "QueryGroup",
@@ -5170,7 +5290,7 @@
                         "name": "${datasource}"
                       },
                       "spec": {
-                        "expr": "sum(last_over_time({container=\"forge-scout\"} |= `scan ` | json msg=\"msg\", forge=\"forge\", connection=\"connection\", open_age_90d_plus=\"open_age_90d_plus\", open_prs_read=\"open_prs_read\", open_issues_read=\"open_issues_read\" | msg=`scan complete` or msg=`scan stopped` | forge=~\"$forge\" | label_format open_age_90d_plus=`{{ if and (eq .open_prs_read \"complete\") (eq .open_issues_read \"complete\") .open_age_90d_plus }}{{ .open_age_90d_plus }}{{ else if or (eq .open_prs_read \"unsupported\") (eq .open_prs_read \"excluded\") (eq .open_issues_read \"unsupported\") (eq .open_issues_read \"excluded\") }}{{ else }}NaN{{ end }}` | keep connection, open_age_90d_plus | unwrap open_age_90d_plus | __error__=\"\" [$__range]) by (connection))",
+                        "expr": "sum(last_over_time({container=\"forge-scout\"} |= `scan ` | json msg=\"msg\", forge=\"forge\", connection=\"connection\", open_age_90d_plus_prs=\"open_age_90d_plus_prs\", open_prs_read=\"open_prs_read\" | msg=`scan complete` or msg=`scan stopped` | forge=~\"$forge\" | label_format open_age_90d_plus_prs=`{{ if and (eq .open_prs_read \"complete\") .open_age_90d_plus_prs }}{{ .open_age_90d_plus_prs }}{{ else if or (eq .open_prs_read \"unsupported\") (eq .open_prs_read \"excluded\") }}{{ else }}NaN{{ end }}` | keep connection, open_age_90d_plus_prs | unwrap open_age_90d_plus_prs | __error__=\"\" [$__range]) by (connection))",
                         "queryType": "instant"
                       }
                     },
@@ -5334,7 +5454,7 @@
         "spec": {
           "id": 44,
           "title": "Open pull requests",
-          "description": "Every open pull request, oldest last activity first, up to 25 per forge from the newest scan. Labels are the forge's labels joined by commas. A title ending in draft is one its author marked as not ready. Checks reads Not available with this token where GitHub refuses the token a pull request's checks.",
+          "description": "Every open pull request, oldest last activity first, up to 25 per forge from the newest scan. Labels are the forge's labels joined by commas, and a title ending in draft is one its author marked as not ready. Checks reads Not available with this token where GitHub refuses the token a pull request's checks, which only a classic token with the repo scope can read, since fine-grained tokens have no Checks permission.",
           "links": [],
           "data": {
             "kind": "QueryGroup",
@@ -6734,7 +6854,7 @@
         "kind": "Panel",
         "spec": {
           "id": 49,
-          "title": "Open work by repository",
+          "title": "PRs and issues by repository",
           "description": "Open pull requests and issues per repository and connection in the newest scan, the busiest first. It reads up to 2,000 lines, so with more than 1,000 open items in one scan the counts fall short. A connection whose list was not read whole adds nothing.",
           "links": [],
           "data": {
@@ -7042,8 +7162,8 @@
         "kind": "Panel",
         "spec": {
           "id": 50,
-          "title": "Open work by age",
-          "description": "Open pull requests and issues together in each connection's newest scan that read both whole, per interval of an hour unless the range spans weeks, stacked by how long ago each was created. A growing red band is work going stale, the top edge is the total and a dip means a connection logged no scan. A gap means a connection did not read both lists whole, because a read failed or was cut short, the connection could not be opened or the scan stopped before counting. One connection's gap blanks the total, so narrow the Forge filter or turn on Split by forge at the top, which stacks each age once per forge.",
+          "title": "Open pull requests by age",
+          "description": "Open pull requests in each connection's newest scan that read them whole, per interval of an hour unless the range spans weeks, stacked by how long ago each was created. A growing red band is work going stale, the top edge is the total and a dip means a connection logged no scan. A gap means a connection did not read its pull requests whole, because a read failed or was cut short, the connection could not be opened or the scan stopped before counting. One connection's gap blanks the total, so narrow the Forge filter or turn on Split by forge at the top, which stacks each age once per forge.",
           "links": [],
           "data": {
             "kind": "QueryGroup",
@@ -7060,7 +7180,7 @@
                         "name": "${datasource}"
                       },
                       "spec": {
-                        "expr": "sum by (msg$split) (last_over_time({container=\"forge-scout\"} |= `scan complete` | json msg=\"msg\", forge=\"forge\", connection=\"connection\", open_age_lt7d=\"open_age_lt7d\", open_prs_read=\"open_prs_read\", open_issues_read=\"open_issues_read\" | msg=`scan complete` | forge=~\"$forge\" | open_prs_read=`complete` | open_issues_read=`complete` | unwrap open_age_lt7d | __error__=\"\" [$__interval]) by (connection, msg, forge) or last_over_time({container=\"forge-scout\"} |= `scan ` | json msg=\"msg\", forge=\"forge\", connection=\"connection\", open_prs_read=\"open_prs_read\", open_issues_read=\"open_issues_read\" | msg=`scan complete` or msg=`scan stopped` | forge=~\"$forge\" | open_prs_read!~`unsupported|excluded` | open_issues_read!~`unsupported|excluded` | label_format msg=`scan complete`, open_age_lt7d=`NaN` | unwrap open_age_lt7d | __error__=\"\" [$__interval]) by (connection, msg, forge))",
+                        "expr": "sum by (msg$split) (last_over_time({container=\"forge-scout\"} |= `scan complete` | json msg=\"msg\", forge=\"forge\", connection=\"connection\", open_age_lt7d_prs=\"open_age_lt7d_prs\", open_prs_read=\"open_prs_read\" | msg=`scan complete` | forge=~\"$forge\" | open_prs_read=`complete` | unwrap open_age_lt7d_prs | __error__=\"\" [$__interval]) by (connection, msg, forge) or last_over_time({container=\"forge-scout\"} |= `scan ` | json msg=\"msg\", forge=\"forge\", connection=\"connection\", open_prs_read=\"open_prs_read\" | msg=`scan complete` or msg=`scan stopped` | forge=~\"$forge\" | open_prs_read!~`unsupported|excluded` | label_format msg=`scan complete`, open_age_lt7d_prs=`NaN` | unwrap open_age_lt7d_prs | __error__=\"\" [$__interval]) by (connection, msg, forge))",
                         "queryType": "range",
                         "legendFormat": "Under 7 days {{forge}}"
                       }
@@ -7080,7 +7200,7 @@
                         "name": "${datasource}"
                       },
                       "spec": {
-                        "expr": "sum by (msg$split) (last_over_time({container=\"forge-scout\"} |= `scan complete` | json msg=\"msg\", forge=\"forge\", connection=\"connection\", open_age_7_30d=\"open_age_7_30d\", open_prs_read=\"open_prs_read\", open_issues_read=\"open_issues_read\" | msg=`scan complete` | forge=~\"$forge\" | open_prs_read=`complete` | open_issues_read=`complete` | unwrap open_age_7_30d | __error__=\"\" [$__interval]) by (connection, msg, forge) or last_over_time({container=\"forge-scout\"} |= `scan ` | json msg=\"msg\", forge=\"forge\", connection=\"connection\", open_prs_read=\"open_prs_read\", open_issues_read=\"open_issues_read\" | msg=`scan complete` or msg=`scan stopped` | forge=~\"$forge\" | open_prs_read!~`unsupported|excluded` | open_issues_read!~`unsupported|excluded` | label_format msg=`scan complete`, open_age_7_30d=`NaN` | unwrap open_age_7_30d | __error__=\"\" [$__interval]) by (connection, msg, forge))",
+                        "expr": "sum by (msg$split) (last_over_time({container=\"forge-scout\"} |= `scan complete` | json msg=\"msg\", forge=\"forge\", connection=\"connection\", open_age_7_30d_prs=\"open_age_7_30d_prs\", open_prs_read=\"open_prs_read\" | msg=`scan complete` | forge=~\"$forge\" | open_prs_read=`complete` | unwrap open_age_7_30d_prs | __error__=\"\" [$__interval]) by (connection, msg, forge) or last_over_time({container=\"forge-scout\"} |= `scan ` | json msg=\"msg\", forge=\"forge\", connection=\"connection\", open_prs_read=\"open_prs_read\" | msg=`scan complete` or msg=`scan stopped` | forge=~\"$forge\" | open_prs_read!~`unsupported|excluded` | label_format msg=`scan complete`, open_age_7_30d_prs=`NaN` | unwrap open_age_7_30d_prs | __error__=\"\" [$__interval]) by (connection, msg, forge))",
                         "queryType": "range",
                         "legendFormat": "7 to 30 days {{forge}}"
                       }
@@ -7100,7 +7220,7 @@
                         "name": "${datasource}"
                       },
                       "spec": {
-                        "expr": "sum by (msg$split) (last_over_time({container=\"forge-scout\"} |= `scan complete` | json msg=\"msg\", forge=\"forge\", connection=\"connection\", open_age_30_90d=\"open_age_30_90d\", open_prs_read=\"open_prs_read\", open_issues_read=\"open_issues_read\" | msg=`scan complete` | forge=~\"$forge\" | open_prs_read=`complete` | open_issues_read=`complete` | unwrap open_age_30_90d | __error__=\"\" [$__interval]) by (connection, msg, forge) or last_over_time({container=\"forge-scout\"} |= `scan ` | json msg=\"msg\", forge=\"forge\", connection=\"connection\", open_prs_read=\"open_prs_read\", open_issues_read=\"open_issues_read\" | msg=`scan complete` or msg=`scan stopped` | forge=~\"$forge\" | open_prs_read!~`unsupported|excluded` | open_issues_read!~`unsupported|excluded` | label_format msg=`scan complete`, open_age_30_90d=`NaN` | unwrap open_age_30_90d | __error__=\"\" [$__interval]) by (connection, msg, forge))",
+                        "expr": "sum by (msg$split) (last_over_time({container=\"forge-scout\"} |= `scan complete` | json msg=\"msg\", forge=\"forge\", connection=\"connection\", open_age_30_90d_prs=\"open_age_30_90d_prs\", open_prs_read=\"open_prs_read\" | msg=`scan complete` | forge=~\"$forge\" | open_prs_read=`complete` | unwrap open_age_30_90d_prs | __error__=\"\" [$__interval]) by (connection, msg, forge) or last_over_time({container=\"forge-scout\"} |= `scan ` | json msg=\"msg\", forge=\"forge\", connection=\"connection\", open_prs_read=\"open_prs_read\" | msg=`scan complete` or msg=`scan stopped` | forge=~\"$forge\" | open_prs_read!~`unsupported|excluded` | label_format msg=`scan complete`, open_age_30_90d_prs=`NaN` | unwrap open_age_30_90d_prs | __error__=\"\" [$__interval]) by (connection, msg, forge))",
                         "queryType": "range",
                         "legendFormat": "30 to 90 days {{forge}}"
                       }
@@ -7120,7 +7240,527 @@
                         "name": "${datasource}"
                       },
                       "spec": {
-                        "expr": "sum by (msg$split) (last_over_time({container=\"forge-scout\"} |= `scan complete` | json msg=\"msg\", forge=\"forge\", connection=\"connection\", open_age_90d_plus=\"open_age_90d_plus\", open_prs_read=\"open_prs_read\", open_issues_read=\"open_issues_read\" | msg=`scan complete` | forge=~\"$forge\" | open_prs_read=`complete` | open_issues_read=`complete` | unwrap open_age_90d_plus | __error__=\"\" [$__interval]) by (connection, msg, forge) or last_over_time({container=\"forge-scout\"} |= `scan ` | json msg=\"msg\", forge=\"forge\", connection=\"connection\", open_prs_read=\"open_prs_read\", open_issues_read=\"open_issues_read\" | msg=`scan complete` or msg=`scan stopped` | forge=~\"$forge\" | open_prs_read!~`unsupported|excluded` | open_issues_read!~`unsupported|excluded` | label_format msg=`scan complete`, open_age_90d_plus=`NaN` | unwrap open_age_90d_plus | __error__=\"\" [$__interval]) by (connection, msg, forge))",
+                        "expr": "sum by (msg$split) (last_over_time({container=\"forge-scout\"} |= `scan complete` | json msg=\"msg\", forge=\"forge\", connection=\"connection\", open_age_90d_plus_prs=\"open_age_90d_plus_prs\", open_prs_read=\"open_prs_read\" | msg=`scan complete` | forge=~\"$forge\" | open_prs_read=`complete` | unwrap open_age_90d_plus_prs | __error__=\"\" [$__interval]) by (connection, msg, forge) or last_over_time({container=\"forge-scout\"} |= `scan ` | json msg=\"msg\", forge=\"forge\", connection=\"connection\", open_prs_read=\"open_prs_read\" | msg=`scan complete` or msg=`scan stopped` | forge=~\"$forge\" | open_prs_read!~`unsupported|excluded` | label_format msg=`scan complete`, open_age_90d_plus_prs=`NaN` | unwrap open_age_90d_plus_prs | __error__=\"\" [$__interval]) by (connection, msg, forge))",
+                        "queryType": "range",
+                        "legendFormat": "90 days or more {{forge}}"
+                      }
+                    },
+                    "refId": "D",
+                    "hidden": false
+                  }
+                }
+              ],
+              "transformations": [],
+              "queryOptions": {
+                "interval": "1h"
+              }
+            }
+          },
+          "vizConfig": {
+            "kind": "VizConfig",
+            "group": "timeseries",
+            "version": "",
+            "spec": {
+              "options": {
+                "legend": {
+                  "showLegend": true,
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "calcs": []
+                },
+                "tooltip": {
+                  "mode": "multi",
+                  "sort": "desc"
+                }
+              },
+              "fieldConfig": {
+                "defaults": {
+                  "unit": "none",
+                  "min": 0,
+                  "decimals": 0,
+                  "custom": {
+                    "drawStyle": "line",
+                    "lineWidth": 1,
+                    "fillOpacity": 30,
+                    "stacking": {
+                      "mode": "normal",
+                      "group": "A"
+                    },
+                    "showPoints": "never",
+                    "spanNulls": false,
+                    "axisSoftMin": 0,
+                    "barAlignment": 0
+                  },
+                  "noValue": "No scan in this range",
+                  "color": {
+                    "mode": "palette-classic"
+                  }
+                },
+                "overrides": [
+                  {
+                    "matcher": {
+                      "id": "byRegexp",
+                      "options": "^Under 7 days.*"
+                    },
+                    "properties": [
+                      {
+                        "id": "displayName",
+                        "value": "Under 7 days ${__field.labels.forge}"
+                      },
+                      {
+                        "id": "color",
+                        "value": {
+                          "mode": "fixed",
+                          "fixedColor": "green"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "matcher": {
+                      "id": "byRegexp",
+                      "options": "^7 to 30 days.*"
+                    },
+                    "properties": [
+                      {
+                        "id": "displayName",
+                        "value": "7 to 30 days ${__field.labels.forge}"
+                      },
+                      {
+                        "id": "color",
+                        "value": {
+                          "mode": "fixed",
+                          "fixedColor": "blue"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "matcher": {
+                      "id": "byRegexp",
+                      "options": "^30 to 90 days.*"
+                    },
+                    "properties": [
+                      {
+                        "id": "displayName",
+                        "value": "30 to 90 days ${__field.labels.forge}"
+                      },
+                      {
+                        "id": "color",
+                        "value": {
+                          "mode": "fixed",
+                          "fixedColor": "orange"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "matcher": {
+                      "id": "byRegexp",
+                      "options": "^90 days or more.*"
+                    },
+                    "properties": [
+                      {
+                        "id": "displayName",
+                        "value": "90 days or more ${__field.labels.forge}"
+                      },
+                      {
+                        "id": "color",
+                        "value": {
+                          "mode": "fixed",
+                          "fixedColor": "red"
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        }
+      },
+      "panel-51": {
+        "kind": "Panel",
+        "spec": {
+          "id": 51,
+          "title": "Issues untouched for 30+ days",
+          "description": "Open issues with no activity for 30 days or more, summed over each connection's newest scan. The tile turns yellow at 1, a prompt to close, label or nudge them. The issues age chart under Backlog shows the trend. It reads No whole count in the newest scan when a selected connection's newest scan did not read it whole, stopped before counting or had no known forge, so narrow the Forge filter.",
+          "links": [],
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "loki",
+                      "version": "v0",
+                      "datasource": {
+                        "name": "${datasource}"
+                      },
+                      "spec": {
+                        "expr": "sum(last_over_time({container=\"forge-scout\"} |= `scan ` | json msg=\"msg\", forge=\"forge\", connection=\"connection\", idle_30d_issues=\"idle_30d_issues\", open_issues_read=\"open_issues_read\" | msg=`scan complete` or msg=`scan stopped` | forge=~\"$forge\" | label_format idle_30d_issues=`{{ if and (eq .open_issues_read \"complete\") .idle_30d_issues }}{{ .idle_30d_issues }}{{ else if or (eq .open_issues_read \"unsupported\") (eq .open_issues_read \"excluded\") }}{{ else }}NaN{{ end }}` | keep connection, idle_30d_issues | unwrap idle_30d_issues | __error__=\"\" [$__range]) by (connection))",
+                        "queryType": "instant"
+                      }
+                    },
+                    "refId": "A",
+                    "hidden": false
+                  }
+                }
+              ],
+              "transformations": [],
+              "queryOptions": {}
+            }
+          },
+          "vizConfig": {
+            "kind": "VizConfig",
+            "group": "stat",
+            "version": "",
+            "spec": {
+              "options": {
+                "colorMode": "value",
+                "graphMode": "none",
+                "justifyMode": "center",
+                "orientation": "auto",
+                "textMode": "value",
+                "wideLayout": true,
+                "showPercentChange": false,
+                "text": {
+                  "titleSize": 14,
+                  "valueSize": 28
+                },
+                "reduceOptions": {
+                  "calcs": [
+                    "last"
+                  ],
+                  "fields": "",
+                  "values": false
+                }
+              },
+              "fieldConfig": {
+                "defaults": {
+                  "unit": "short",
+                  "decimals": 0,
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "value": null,
+                        "color": "text"
+                      },
+                      {
+                        "value": 0,
+                        "color": "green"
+                      },
+                      {
+                        "value": 1,
+                        "color": "yellow"
+                      }
+                    ]
+                  },
+                  "color": {
+                    "mode": "thresholds"
+                  },
+                  "noValue": "No scan in this range",
+                  "mappings": [
+                    {
+                      "type": "special",
+                      "options": {
+                        "match": "nan",
+                        "result": {
+                          "index": 0,
+                          "text": "No whole count in the newest scan",
+                          "color": "yellow"
+                        }
+                      }
+                    }
+                  ]
+                },
+                "overrides": []
+              }
+            }
+          }
+        }
+      },
+      "panel-52": {
+        "kind": "Panel",
+        "spec": {
+          "id": 52,
+          "title": "Issues opened in last 7 days",
+          "description": "Open issues created in the last 7 days, summed over each connection's newest scan. It counts new issues that are still open, not every one opened this week. It reads No whole count in the newest scan when a selected connection's newest scan did not read it whole, stopped before counting or had no known forge, so narrow the Forge filter.",
+          "links": [],
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "loki",
+                      "version": "v0",
+                      "datasource": {
+                        "name": "${datasource}"
+                      },
+                      "spec": {
+                        "expr": "sum(last_over_time({container=\"forge-scout\"} |= `scan ` | json msg=\"msg\", forge=\"forge\", connection=\"connection\", open_age_lt7d_issues=\"open_age_lt7d_issues\", open_issues_read=\"open_issues_read\" | msg=`scan complete` or msg=`scan stopped` | forge=~\"$forge\" | label_format open_age_lt7d_issues=`{{ if and (eq .open_issues_read \"complete\") .open_age_lt7d_issues }}{{ .open_age_lt7d_issues }}{{ else if or (eq .open_issues_read \"unsupported\") (eq .open_issues_read \"excluded\") }}{{ else }}NaN{{ end }}` | keep connection, open_age_lt7d_issues | unwrap open_age_lt7d_issues | __error__=\"\" [$__range]) by (connection))",
+                        "queryType": "instant"
+                      }
+                    },
+                    "refId": "A",
+                    "hidden": false
+                  }
+                }
+              ],
+              "transformations": [],
+              "queryOptions": {}
+            }
+          },
+          "vizConfig": {
+            "kind": "VizConfig",
+            "group": "stat",
+            "version": "",
+            "spec": {
+              "options": {
+                "colorMode": "value",
+                "graphMode": "none",
+                "justifyMode": "center",
+                "orientation": "auto",
+                "textMode": "value",
+                "wideLayout": true,
+                "showPercentChange": false,
+                "text": {
+                  "titleSize": 14,
+                  "valueSize": 28
+                },
+                "reduceOptions": {
+                  "calcs": [
+                    "last"
+                  ],
+                  "fields": "",
+                  "values": false
+                }
+              },
+              "fieldConfig": {
+                "defaults": {
+                  "unit": "short",
+                  "decimals": 0,
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "value": null,
+                        "color": "text"
+                      }
+                    ]
+                  },
+                  "color": {
+                    "mode": "thresholds"
+                  },
+                  "noValue": "No scan in this range",
+                  "mappings": [
+                    {
+                      "type": "special",
+                      "options": {
+                        "match": "nan",
+                        "result": {
+                          "index": 0,
+                          "text": "No whole count in the newest scan",
+                          "color": "yellow"
+                        }
+                      }
+                    }
+                  ]
+                },
+                "overrides": []
+              }
+            }
+          }
+        }
+      },
+      "panel-53": {
+        "kind": "Panel",
+        "spec": {
+          "id": 53,
+          "title": "Issues open for 90+ days",
+          "description": "Open issues created 90 days ago or more, summed over each connection's newest scan. It reads No whole count in the newest scan when a selected connection's newest scan did not read it whole, stopped before counting or had no known forge, so narrow the Forge filter.",
+          "links": [],
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "loki",
+                      "version": "v0",
+                      "datasource": {
+                        "name": "${datasource}"
+                      },
+                      "spec": {
+                        "expr": "sum(last_over_time({container=\"forge-scout\"} |= `scan ` | json msg=\"msg\", forge=\"forge\", connection=\"connection\", open_age_90d_plus_issues=\"open_age_90d_plus_issues\", open_issues_read=\"open_issues_read\" | msg=`scan complete` or msg=`scan stopped` | forge=~\"$forge\" | label_format open_age_90d_plus_issues=`{{ if and (eq .open_issues_read \"complete\") .open_age_90d_plus_issues }}{{ .open_age_90d_plus_issues }}{{ else if or (eq .open_issues_read \"unsupported\") (eq .open_issues_read \"excluded\") }}{{ else }}NaN{{ end }}` | keep connection, open_age_90d_plus_issues | unwrap open_age_90d_plus_issues | __error__=\"\" [$__range]) by (connection))",
+                        "queryType": "instant"
+                      }
+                    },
+                    "refId": "A",
+                    "hidden": false
+                  }
+                }
+              ],
+              "transformations": [],
+              "queryOptions": {}
+            }
+          },
+          "vizConfig": {
+            "kind": "VizConfig",
+            "group": "stat",
+            "version": "",
+            "spec": {
+              "options": {
+                "colorMode": "value",
+                "graphMode": "none",
+                "justifyMode": "center",
+                "orientation": "auto",
+                "textMode": "value",
+                "wideLayout": true,
+                "showPercentChange": false,
+                "text": {
+                  "titleSize": 14,
+                  "valueSize": 28
+                },
+                "reduceOptions": {
+                  "calcs": [
+                    "last"
+                  ],
+                  "fields": "",
+                  "values": false
+                }
+              },
+              "fieldConfig": {
+                "defaults": {
+                  "unit": "short",
+                  "decimals": 0,
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "value": null,
+                        "color": "text"
+                      }
+                    ]
+                  },
+                  "color": {
+                    "mode": "thresholds"
+                  },
+                  "noValue": "No scan in this range",
+                  "mappings": [
+                    {
+                      "type": "special",
+                      "options": {
+                        "match": "nan",
+                        "result": {
+                          "index": 0,
+                          "text": "No whole count in the newest scan",
+                          "color": "yellow"
+                        }
+                      }
+                    }
+                  ]
+                },
+                "overrides": []
+              }
+            }
+          }
+        }
+      },
+      "panel-54": {
+        "kind": "Panel",
+        "spec": {
+          "id": 54,
+          "title": "Open issues by age",
+          "description": "Open issues in each connection's newest scan that read them whole, per interval of an hour unless the range spans weeks, stacked by how long ago each was created. A growing red band is work going stale, the top edge is the total and a dip means a connection logged no scan. A gap means a connection did not read its issues whole, because a read failed or was cut short, the connection could not be opened or the scan stopped before counting. One connection's gap blanks the total, so narrow the Forge filter or turn on Split by forge at the top, which stacks each age once per forge.",
+          "links": [],
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "loki",
+                      "version": "v0",
+                      "datasource": {
+                        "name": "${datasource}"
+                      },
+                      "spec": {
+                        "expr": "sum by (msg$split) (last_over_time({container=\"forge-scout\"} |= `scan complete` | json msg=\"msg\", forge=\"forge\", connection=\"connection\", open_age_lt7d_issues=\"open_age_lt7d_issues\", open_issues_read=\"open_issues_read\" | msg=`scan complete` | forge=~\"$forge\" | open_issues_read=`complete` | unwrap open_age_lt7d_issues | __error__=\"\" [$__interval]) by (connection, msg, forge) or last_over_time({container=\"forge-scout\"} |= `scan ` | json msg=\"msg\", forge=\"forge\", connection=\"connection\", open_issues_read=\"open_issues_read\" | msg=`scan complete` or msg=`scan stopped` | forge=~\"$forge\" | open_issues_read!~`unsupported|excluded` | label_format msg=`scan complete`, open_age_lt7d_issues=`NaN` | unwrap open_age_lt7d_issues | __error__=\"\" [$__interval]) by (connection, msg, forge))",
+                        "queryType": "range",
+                        "legendFormat": "Under 7 days {{forge}}"
+                      }
+                    },
+                    "refId": "A",
+                    "hidden": false
+                  }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "loki",
+                      "version": "v0",
+                      "datasource": {
+                        "name": "${datasource}"
+                      },
+                      "spec": {
+                        "expr": "sum by (msg$split) (last_over_time({container=\"forge-scout\"} |= `scan complete` | json msg=\"msg\", forge=\"forge\", connection=\"connection\", open_age_7_30d_issues=\"open_age_7_30d_issues\", open_issues_read=\"open_issues_read\" | msg=`scan complete` | forge=~\"$forge\" | open_issues_read=`complete` | unwrap open_age_7_30d_issues | __error__=\"\" [$__interval]) by (connection, msg, forge) or last_over_time({container=\"forge-scout\"} |= `scan ` | json msg=\"msg\", forge=\"forge\", connection=\"connection\", open_issues_read=\"open_issues_read\" | msg=`scan complete` or msg=`scan stopped` | forge=~\"$forge\" | open_issues_read!~`unsupported|excluded` | label_format msg=`scan complete`, open_age_7_30d_issues=`NaN` | unwrap open_age_7_30d_issues | __error__=\"\" [$__interval]) by (connection, msg, forge))",
+                        "queryType": "range",
+                        "legendFormat": "7 to 30 days {{forge}}"
+                      }
+                    },
+                    "refId": "B",
+                    "hidden": false
+                  }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "loki",
+                      "version": "v0",
+                      "datasource": {
+                        "name": "${datasource}"
+                      },
+                      "spec": {
+                        "expr": "sum by (msg$split) (last_over_time({container=\"forge-scout\"} |= `scan complete` | json msg=\"msg\", forge=\"forge\", connection=\"connection\", open_age_30_90d_issues=\"open_age_30_90d_issues\", open_issues_read=\"open_issues_read\" | msg=`scan complete` | forge=~\"$forge\" | open_issues_read=`complete` | unwrap open_age_30_90d_issues | __error__=\"\" [$__interval]) by (connection, msg, forge) or last_over_time({container=\"forge-scout\"} |= `scan ` | json msg=\"msg\", forge=\"forge\", connection=\"connection\", open_issues_read=\"open_issues_read\" | msg=`scan complete` or msg=`scan stopped` | forge=~\"$forge\" | open_issues_read!~`unsupported|excluded` | label_format msg=`scan complete`, open_age_30_90d_issues=`NaN` | unwrap open_age_30_90d_issues | __error__=\"\" [$__interval]) by (connection, msg, forge))",
+                        "queryType": "range",
+                        "legendFormat": "30 to 90 days {{forge}}"
+                      }
+                    },
+                    "refId": "C",
+                    "hidden": false
+                  }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "loki",
+                      "version": "v0",
+                      "datasource": {
+                        "name": "${datasource}"
+                      },
+                      "spec": {
+                        "expr": "sum by (msg$split) (last_over_time({container=\"forge-scout\"} |= `scan complete` | json msg=\"msg\", forge=\"forge\", connection=\"connection\", open_age_90d_plus_issues=\"open_age_90d_plus_issues\", open_issues_read=\"open_issues_read\" | msg=`scan complete` | forge=~\"$forge\" | open_issues_read=`complete` | unwrap open_age_90d_plus_issues | __error__=\"\" [$__interval]) by (connection, msg, forge) or last_over_time({container=\"forge-scout\"} |= `scan ` | json msg=\"msg\", forge=\"forge\", connection=\"connection\", open_issues_read=\"open_issues_read\" | msg=`scan complete` or msg=`scan stopped` | forge=~\"$forge\" | open_issues_read!~`unsupported|excluded` | label_format msg=`scan complete`, open_age_90d_plus_issues=`NaN` | unwrap open_age_90d_plus_issues | __error__=\"\" [$__interval]) by (connection, msg, forge))",
                         "queryType": "range",
                         "legendFormat": "90 days or more {{forge}}"
                       }
@@ -7668,7 +8308,7 @@
         "spec": {
           "id": 64,
           "title": "Unrated",
-          "description": "Open code scanning alerts rated unrated, read on GitHub only, summed over each connection's newest scan. An unrated alert comes from a tool that sets no severity. It reads No whole count in the newest scan when a selected connection's newest scan did not read it whole, stopped before counting or had no known forge, so narrow the Forge filter. It reads Not on these forges, or no scan when no selected connection has the signal or none finished a scan in the time range.",
+          "description": "Open code scanning alerts whose security severity GitHub does not document, or that have none and no problem severity of error, warning or note, read on GitHub only, summed over each connection's newest scan. It reads No whole count in the newest scan when a selected connection's newest scan did not read it whole, stopped before counting or had no known forge, so narrow the Forge filter. It reads Not on these forges, or no scan when no selected connection has the signal or none finished a scan in the time range.",
           "links": [],
           "data": {
             "kind": "QueryGroup",
@@ -7686,6 +8326,297 @@
                       },
                       "spec": {
                         "expr": "sum(last_over_time({container=\"forge-scout\"} |= `scan ` | json msg=\"msg\", forge=\"forge\", connection=\"connection\", security_alerts_unrated=\"security_alerts_unrated\", security_alerts_read=\"security_alerts_read\" | msg=`scan complete` or msg=`scan stopped` | forge=~\"$forge\" | label_format security_alerts_unrated=`{{ if and (eq .security_alerts_read \"complete\") .security_alerts_unrated }}{{ .security_alerts_unrated }}{{ else if or (eq .security_alerts_read \"unsupported\") (eq .security_alerts_read \"excluded\") }}{{ else }}NaN{{ end }}` | keep connection, security_alerts_unrated | unwrap security_alerts_unrated | __error__=\"\" [$__range]) by (connection))",
+                        "queryType": "instant"
+                      }
+                    },
+                    "refId": "A",
+                    "hidden": false
+                  }
+                }
+              ],
+              "transformations": [],
+              "queryOptions": {}
+            }
+          },
+          "vizConfig": {
+            "kind": "VizConfig",
+            "group": "stat",
+            "version": "",
+            "spec": {
+              "options": {
+                "colorMode": "value",
+                "graphMode": "none",
+                "justifyMode": "center",
+                "orientation": "auto",
+                "textMode": "value",
+                "wideLayout": true,
+                "showPercentChange": false,
+                "text": {
+                  "titleSize": 14,
+                  "valueSize": 28
+                },
+                "reduceOptions": {
+                  "calcs": [
+                    "last"
+                  ],
+                  "fields": "",
+                  "values": false
+                }
+              },
+              "fieldConfig": {
+                "defaults": {
+                  "unit": "short",
+                  "decimals": 0,
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "value": null,
+                        "color": "text"
+                      }
+                    ]
+                  },
+                  "color": {
+                    "mode": "thresholds"
+                  },
+                  "noValue": "Not on these forges, or no scan",
+                  "mappings": [
+                    {
+                      "type": "special",
+                      "options": {
+                        "match": "nan",
+                        "result": {
+                          "index": 0,
+                          "text": "No whole count in the newest scan",
+                          "color": "yellow"
+                        }
+                      }
+                    }
+                  ]
+                },
+                "overrides": []
+              }
+            }
+          }
+        }
+      },
+      "panel-81": {
+        "kind": "Panel",
+        "spec": {
+          "id": 81,
+          "title": "Error, no security severity",
+          "description": "Open code scanning alerts with no security severity whose problem severity is error, as a linter that rates only problems reports them, read on GitHub only, summed over each connection's newest scan. It reads No whole count in the newest scan when a selected connection's newest scan did not read it whole, stopped before counting or had no known forge, so narrow the Forge filter. It reads Not on these forges, or no scan when no selected connection has the signal or none finished a scan in the time range.",
+          "links": [],
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "loki",
+                      "version": "v0",
+                      "datasource": {
+                        "name": "${datasource}"
+                      },
+                      "spec": {
+                        "expr": "sum(last_over_time({container=\"forge-scout\"} |= `scan ` | json msg=\"msg\", forge=\"forge\", connection=\"connection\", security_alerts_unrated_error=\"security_alerts_unrated_error\", security_alerts_read=\"security_alerts_read\" | msg=`scan complete` or msg=`scan stopped` | forge=~\"$forge\" | label_format security_alerts_unrated_error=`{{ if and (eq .security_alerts_read \"complete\") .security_alerts_unrated_error }}{{ .security_alerts_unrated_error }}{{ else if or (eq .security_alerts_read \"unsupported\") (eq .security_alerts_read \"excluded\") }}{{ else }}NaN{{ end }}` | keep connection, security_alerts_unrated_error | unwrap security_alerts_unrated_error | __error__=\"\" [$__range]) by (connection))",
+                        "queryType": "instant"
+                      }
+                    },
+                    "refId": "A",
+                    "hidden": false
+                  }
+                }
+              ],
+              "transformations": [],
+              "queryOptions": {}
+            }
+          },
+          "vizConfig": {
+            "kind": "VizConfig",
+            "group": "stat",
+            "version": "",
+            "spec": {
+              "options": {
+                "colorMode": "value",
+                "graphMode": "none",
+                "justifyMode": "center",
+                "orientation": "auto",
+                "textMode": "value",
+                "wideLayout": true,
+                "showPercentChange": false,
+                "text": {
+                  "titleSize": 14,
+                  "valueSize": 28
+                },
+                "reduceOptions": {
+                  "calcs": [
+                    "last"
+                  ],
+                  "fields": "",
+                  "values": false
+                }
+              },
+              "fieldConfig": {
+                "defaults": {
+                  "unit": "short",
+                  "decimals": 0,
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "value": null,
+                        "color": "text"
+                      }
+                    ]
+                  },
+                  "color": {
+                    "mode": "thresholds"
+                  },
+                  "noValue": "Not on these forges, or no scan",
+                  "mappings": [
+                    {
+                      "type": "special",
+                      "options": {
+                        "match": "nan",
+                        "result": {
+                          "index": 0,
+                          "text": "No whole count in the newest scan",
+                          "color": "yellow"
+                        }
+                      }
+                    }
+                  ]
+                },
+                "overrides": []
+              }
+            }
+          }
+        }
+      },
+      "panel-82": {
+        "kind": "Panel",
+        "spec": {
+          "id": 82,
+          "title": "Warning, no security severity",
+          "description": "Open code scanning alerts with no security severity whose problem severity is warning, as a linter that rates only problems reports them, read on GitHub only, summed over each connection's newest scan. It reads No whole count in the newest scan when a selected connection's newest scan did not read it whole, stopped before counting or had no known forge, so narrow the Forge filter. It reads Not on these forges, or no scan when no selected connection has the signal or none finished a scan in the time range.",
+          "links": [],
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "loki",
+                      "version": "v0",
+                      "datasource": {
+                        "name": "${datasource}"
+                      },
+                      "spec": {
+                        "expr": "sum(last_over_time({container=\"forge-scout\"} |= `scan ` | json msg=\"msg\", forge=\"forge\", connection=\"connection\", security_alerts_unrated_warning=\"security_alerts_unrated_warning\", security_alerts_read=\"security_alerts_read\" | msg=`scan complete` or msg=`scan stopped` | forge=~\"$forge\" | label_format security_alerts_unrated_warning=`{{ if and (eq .security_alerts_read \"complete\") .security_alerts_unrated_warning }}{{ .security_alerts_unrated_warning }}{{ else if or (eq .security_alerts_read \"unsupported\") (eq .security_alerts_read \"excluded\") }}{{ else }}NaN{{ end }}` | keep connection, security_alerts_unrated_warning | unwrap security_alerts_unrated_warning | __error__=\"\" [$__range]) by (connection))",
+                        "queryType": "instant"
+                      }
+                    },
+                    "refId": "A",
+                    "hidden": false
+                  }
+                }
+              ],
+              "transformations": [],
+              "queryOptions": {}
+            }
+          },
+          "vizConfig": {
+            "kind": "VizConfig",
+            "group": "stat",
+            "version": "",
+            "spec": {
+              "options": {
+                "colorMode": "value",
+                "graphMode": "none",
+                "justifyMode": "center",
+                "orientation": "auto",
+                "textMode": "value",
+                "wideLayout": true,
+                "showPercentChange": false,
+                "text": {
+                  "titleSize": 14,
+                  "valueSize": 28
+                },
+                "reduceOptions": {
+                  "calcs": [
+                    "last"
+                  ],
+                  "fields": "",
+                  "values": false
+                }
+              },
+              "fieldConfig": {
+                "defaults": {
+                  "unit": "short",
+                  "decimals": 0,
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "value": null,
+                        "color": "text"
+                      }
+                    ]
+                  },
+                  "color": {
+                    "mode": "thresholds"
+                  },
+                  "noValue": "Not on these forges, or no scan",
+                  "mappings": [
+                    {
+                      "type": "special",
+                      "options": {
+                        "match": "nan",
+                        "result": {
+                          "index": 0,
+                          "text": "No whole count in the newest scan",
+                          "color": "yellow"
+                        }
+                      }
+                    }
+                  ]
+                },
+                "overrides": []
+              }
+            }
+          }
+        }
+      },
+      "panel-83": {
+        "kind": "Panel",
+        "spec": {
+          "id": 83,
+          "title": "Note, no security severity",
+          "description": "Open code scanning alerts with no security severity whose problem severity is note, as a linter that rates only problems reports them, read on GitHub only, summed over each connection's newest scan. It reads No whole count in the newest scan when a selected connection's newest scan did not read it whole, stopped before counting or had no known forge, so narrow the Forge filter. It reads Not on these forges, or no scan when no selected connection has the signal or none finished a scan in the time range.",
+          "links": [],
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "loki",
+                      "version": "v0",
+                      "datasource": {
+                        "name": "${datasource}"
+                      },
+                      "spec": {
+                        "expr": "sum(last_over_time({container=\"forge-scout\"} |= `scan ` | json msg=\"msg\", forge=\"forge\", connection=\"connection\", security_alerts_unrated_note=\"security_alerts_unrated_note\", security_alerts_read=\"security_alerts_read\" | msg=`scan complete` or msg=`scan stopped` | forge=~\"$forge\" | label_format security_alerts_unrated_note=`{{ if and (eq .security_alerts_read \"complete\") .security_alerts_unrated_note }}{{ .security_alerts_unrated_note }}{{ else if or (eq .security_alerts_read \"unsupported\") (eq .security_alerts_read \"excluded\") }}{{ else }}NaN{{ end }}` | keep connection, security_alerts_unrated_note | unwrap security_alerts_unrated_note | __error__=\"\" [$__range]) by (connection))",
                         "queryType": "instant"
                       }
                     },
@@ -7862,7 +8793,7 @@
         "spec": {
           "id": 66,
           "title": "Alerts by severity over time",
-          "description": "Open code scanning alerts in each connection's newest scan that read them whole, per interval of an hour unless the range spans weeks, stacked by severity so the top edge is the total. A new band at the bottom is a new critical or high finding, and fixed alerts drop out at the next scan, while a dip means a connection logged no scan. A gap means a connection did not read its alerts whole, because a read failed or was cut short, the connection could not be opened or the scan stopped before counting them. One connection's gap blanks the whole total, and Split by forge at the top stacks each severity once per forge.",
+          "description": "Open code scanning alerts in each connection's newest scan that read them whole, stacked by severity so the top edge is the total, and an alert with no security severity by its problem severity. A new band at the bottom is a new critical or high finding, and fixed alerts drop out at the next scan, while a dip means a connection logged no scan. A gap means a connection did not read its alerts whole, because a read failed or was cut short, the connection could not be opened or the scan stopped before counting them. Each point is an hour unless the range spans weeks, one connection's gap blanks the whole total, and Split by forge at the top stacks each severity once per forge.",
           "links": [],
           "data": {
             "kind": "QueryGroup",
@@ -7959,12 +8890,72 @@
                         "name": "${datasource}"
                       },
                       "spec": {
+                        "expr": "sum by (msg$split) (last_over_time({container=\"forge-scout\"} |= `scan complete` | json msg=\"msg\", forge=\"forge\", connection=\"connection\", security_alerts_unrated_error=\"security_alerts_unrated_error\", security_alerts_read=\"security_alerts_read\" | msg=`scan complete` | forge=~\"$forge\" | security_alerts_read=`complete` | unwrap security_alerts_unrated_error | __error__=\"\" [$__interval]) by (connection, msg, forge) or last_over_time({container=\"forge-scout\"} |= `scan ` | json msg=\"msg\", forge=\"forge\", connection=\"connection\", security_alerts_read=\"security_alerts_read\" | msg=`scan complete` or msg=`scan stopped` | forge=~\"$forge\" | security_alerts_read!~`unsupported|excluded` | label_format msg=`scan complete`, security_alerts_unrated_error=`NaN` | unwrap security_alerts_unrated_error | __error__=\"\" [$__interval]) by (connection, msg, forge))",
+                        "queryType": "range",
+                        "legendFormat": "Error, no security severity {{forge}}"
+                      }
+                    },
+                    "refId": "E",
+                    "hidden": false
+                  }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "loki",
+                      "version": "v0",
+                      "datasource": {
+                        "name": "${datasource}"
+                      },
+                      "spec": {
+                        "expr": "sum by (msg$split) (last_over_time({container=\"forge-scout\"} |= `scan complete` | json msg=\"msg\", forge=\"forge\", connection=\"connection\", security_alerts_unrated_warning=\"security_alerts_unrated_warning\", security_alerts_read=\"security_alerts_read\" | msg=`scan complete` | forge=~\"$forge\" | security_alerts_read=`complete` | unwrap security_alerts_unrated_warning | __error__=\"\" [$__interval]) by (connection, msg, forge) or last_over_time({container=\"forge-scout\"} |= `scan ` | json msg=\"msg\", forge=\"forge\", connection=\"connection\", security_alerts_read=\"security_alerts_read\" | msg=`scan complete` or msg=`scan stopped` | forge=~\"$forge\" | security_alerts_read!~`unsupported|excluded` | label_format msg=`scan complete`, security_alerts_unrated_warning=`NaN` | unwrap security_alerts_unrated_warning | __error__=\"\" [$__interval]) by (connection, msg, forge))",
+                        "queryType": "range",
+                        "legendFormat": "Warning, no security severity {{forge}}"
+                      }
+                    },
+                    "refId": "F",
+                    "hidden": false
+                  }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "loki",
+                      "version": "v0",
+                      "datasource": {
+                        "name": "${datasource}"
+                      },
+                      "spec": {
+                        "expr": "sum by (msg$split) (last_over_time({container=\"forge-scout\"} |= `scan complete` | json msg=\"msg\", forge=\"forge\", connection=\"connection\", security_alerts_unrated_note=\"security_alerts_unrated_note\", security_alerts_read=\"security_alerts_read\" | msg=`scan complete` | forge=~\"$forge\" | security_alerts_read=`complete` | unwrap security_alerts_unrated_note | __error__=\"\" [$__interval]) by (connection, msg, forge) or last_over_time({container=\"forge-scout\"} |= `scan ` | json msg=\"msg\", forge=\"forge\", connection=\"connection\", security_alerts_read=\"security_alerts_read\" | msg=`scan complete` or msg=`scan stopped` | forge=~\"$forge\" | security_alerts_read!~`unsupported|excluded` | label_format msg=`scan complete`, security_alerts_unrated_note=`NaN` | unwrap security_alerts_unrated_note | __error__=\"\" [$__interval]) by (connection, msg, forge))",
+                        "queryType": "range",
+                        "legendFormat": "Note, no security severity {{forge}}"
+                      }
+                    },
+                    "refId": "G",
+                    "hidden": false
+                  }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "loki",
+                      "version": "v0",
+                      "datasource": {
+                        "name": "${datasource}"
+                      },
+                      "spec": {
                         "expr": "sum by (msg$split) (last_over_time({container=\"forge-scout\"} |= `scan complete` | json msg=\"msg\", forge=\"forge\", connection=\"connection\", security_alerts_unrated=\"security_alerts_unrated\", security_alerts_read=\"security_alerts_read\" | msg=`scan complete` | forge=~\"$forge\" | security_alerts_read=`complete` | unwrap security_alerts_unrated | __error__=\"\" [$__interval]) by (connection, msg, forge) or last_over_time({container=\"forge-scout\"} |= `scan ` | json msg=\"msg\", forge=\"forge\", connection=\"connection\", security_alerts_read=\"security_alerts_read\" | msg=`scan complete` or msg=`scan stopped` | forge=~\"$forge\" | security_alerts_read!~`unsupported|excluded` | label_format msg=`scan complete`, security_alerts_unrated=`NaN` | unwrap security_alerts_unrated | __error__=\"\" [$__interval]) by (connection, msg, forge))",
                         "queryType": "range",
                         "legendFormat": "Unrated {{forge}}"
                       }
                     },
-                    "refId": "E",
+                    "refId": "H",
                     "hidden": false
                   }
                 }
@@ -8088,6 +9079,63 @@
                         "value": {
                           "mode": "fixed",
                           "fixedColor": "yellow"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "matcher": {
+                      "id": "byRegexp",
+                      "options": "^Error\\ \\(no\\ security\\ severity\\).*"
+                    },
+                    "properties": [
+                      {
+                        "id": "displayName",
+                        "value": "Error, no security severity ${__field.labels.forge}"
+                      },
+                      {
+                        "id": "color",
+                        "value": {
+                          "mode": "fixed",
+                          "fixedColor": "purple"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "matcher": {
+                      "id": "byRegexp",
+                      "options": "^Warning\\ \\(no\\ security\\ severity\\).*"
+                    },
+                    "properties": [
+                      {
+                        "id": "displayName",
+                        "value": "Warning, no security severity ${__field.labels.forge}"
+                      },
+                      {
+                        "id": "color",
+                        "value": {
+                          "mode": "fixed",
+                          "fixedColor": "blue"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "matcher": {
+                      "id": "byRegexp",
+                      "options": "^Note\\ \\(no\\ security\\ severity\\).*"
+                    },
+                    "properties": [
+                      {
+                        "id": "displayName",
+                        "value": "Note, no security severity ${__field.labels.forge}"
+                      },
+                      {
+                        "id": "color",
+                        "value": {
+                          "mode": "fixed",
+                          "fixedColor": "light-blue"
                         }
                       }
                     ]
@@ -8355,7 +9403,7 @@
         "spec": {
           "id": 68,
           "title": "Open code scanning alerts",
-          "description": "Every open code scanning alert, critical first and then oldest, up to 200 per forge from the newest scan. Each rule links to its alert on GitHub. Unrated is an alert whose tool sets no severity.",
+          "description": "Every open code scanning alert, most severe first and then oldest, up to 200 per forge from the newest scan. Each rule links to its alert on GitHub. Severity shows the security severity or, for an alert with none, its problem severity, which ranks after every alert that has one. Unrated is an alert whose security severity GitHub does not document, or that has none and no problem severity of error, warning or note.",
           "links": [],
           "data": {
             "kind": "QueryGroup",
@@ -8392,7 +9440,7 @@
                         "name": "${datasource}"
                       },
                       "spec": {
-                        "expr": "{container=\"forge-scout\"} |= `security alert` | json msg=\"msg\", forge=\"forge\", scan_id=\"scan_id\", forge_rank=\"forge_rank\", connection=\"connection\", repo=\"repo\", severity=\"severity\", rule=\"rule\", tool=\"tool\", number=\"number\", url=\"url\", created_at=\"created_at\" | msg=`security alert` | forge=~\"$forge\" | forge_rank <= 200 | label_format repo=`{{ if eq .connection \"$connections\" }}{{ .repo }}{{ else }}{{ .repo }} on {{ .connection }}{{ end }}` | label_format link=`{{ if eq .forge \"github\" }}Open on GitHub{{ else if eq .forge \"gitlab\" }}Open on GitLab{{ else if eq .forge \"gitea\" }}Open on Gitea{{ else }}Open on Forgejo{{ end }}`",
+                        "expr": "{container=\"forge-scout\"} |= `security alert` | json msg=\"msg\", forge=\"forge\", scan_id=\"scan_id\", forge_rank=\"forge_rank\", connection=\"connection\", repo=\"repo\", security_severity=\"security_severity\", problem_severity=\"problem_severity\", rule=\"rule\", tool=\"tool\", number=\"number\", url=\"url\", created_at=\"created_at\" | msg=`security alert` | forge=~\"$forge\" | forge_rank <= 200 | label_format severity=`{{ if or (eq .security_severity \"critical\") (eq .security_severity \"high\") (eq .security_severity \"medium\") (eq .security_severity \"low\") }}{{ .security_severity }}{{ else if and (not .security_severity) (or (eq .problem_severity \"error\") (eq .problem_severity \"warning\") (eq .problem_severity \"note\")) }}unrated_{{ .problem_severity }}{{ else }}unrated{{ end }}` | label_format repo=`{{ if eq .connection \"$connections\" }}{{ .repo }}{{ else }}{{ .repo }} on {{ .connection }}{{ end }}` | label_format link=`{{ if eq .forge \"github\" }}Open on GitHub{{ else if eq .forge \"gitlab\" }}Open on GitLab{{ else if eq .forge \"gitea\" }}Open on Gitea{{ else }}Open on Forgejo{{ end }}`",
                         "queryType": "range",
                         "maxLines": 1601
                       }
@@ -8539,7 +9587,7 @@
                       },
                       {
                         "id": "custom.width",
-                        "value": 120
+                        "value": 224
                       },
                       {
                         "id": "mappings",
@@ -8567,8 +9615,23 @@
                                 "text": "Low",
                                 "color": "yellow"
                               },
-                              "unrated": {
+                              "unrated_error": {
                                 "index": 4,
+                                "text": "Error, no security severity",
+                                "color": "purple"
+                              },
+                              "unrated_warning": {
+                                "index": 5,
+                                "text": "Warning, no security severity",
+                                "color": "blue"
+                              },
+                              "unrated_note": {
+                                "index": 6,
+                                "text": "Note, no security severity",
+                                "color": "light-blue"
+                              },
+                              "unrated": {
+                                "index": 7,
                                 "text": "Unrated",
                                 "color": "text"
                               }
@@ -12228,7 +13291,7 @@
                                 "spec": {
                                   "x": 0,
                                   "y": 0,
-                                  "width": 6,
+                                  "width": 8,
                                   "height": 4,
                                   "element": {
                                     "kind": "ElementReference",
@@ -12239,61 +13302,9 @@
                               {
                                 "kind": "GridLayoutItem",
                                 "spec": {
-                                  "x": 6,
+                                  "x": 8,
                                   "y": 0,
-                                  "width": 6,
-                                  "height": 4,
-                                  "element": {
-                                    "kind": "ElementReference",
-                                    "name": "panel-11"
-                                  }
-                                }
-                              },
-                              {
-                                "kind": "GridLayoutItem",
-                                "spec": {
-                                  "x": 12,
-                                  "y": 0,
-                                  "width": 6,
-                                  "height": 4,
-                                  "element": {
-                                    "kind": "ElementReference",
-                                    "name": "panel-12"
-                                  }
-                                }
-                              },
-                              {
-                                "kind": "GridLayoutItem",
-                                "spec": {
-                                  "x": 18,
-                                  "y": 0,
-                                  "width": 6,
-                                  "height": 4,
-                                  "element": {
-                                    "kind": "ElementReference",
-                                    "name": "panel-13"
-                                  }
-                                }
-                              },
-                              {
-                                "kind": "GridLayoutItem",
-                                "spec": {
-                                  "x": 0,
-                                  "y": 4,
-                                  "width": 6,
-                                  "height": 4,
-                                  "element": {
-                                    "kind": "ElementReference",
-                                    "name": "panel-14"
-                                  }
-                                }
-                              },
-                              {
-                                "kind": "GridLayoutItem",
-                                "spec": {
-                                  "x": 6,
-                                  "y": 4,
-                                  "width": 6,
+                                  "width": 8,
                                   "height": 4,
                                   "element": {
                                     "kind": "ElementReference",
@@ -12304,9 +13315,9 @@
                               {
                                 "kind": "GridLayoutItem",
                                 "spec": {
-                                  "x": 12,
-                                  "y": 4,
-                                  "width": 6,
+                                  "x": 16,
+                                  "y": 0,
+                                  "width": 8,
                                   "height": 4,
                                   "element": {
                                     "kind": "ElementReference",
@@ -12317,9 +13328,74 @@
                               {
                                 "kind": "GridLayoutItem",
                                 "spec": {
-                                  "x": 18,
+                                  "x": 0,
                                   "y": 4,
-                                  "width": 6,
+                                  "width": 8,
+                                  "height": 4,
+                                  "element": {
+                                    "kind": "ElementReference",
+                                    "name": "panel-13"
+                                  }
+                                }
+                              },
+                              {
+                                "kind": "GridLayoutItem",
+                                "spec": {
+                                  "x": 8,
+                                  "y": 4,
+                                  "width": 8,
+                                  "height": 4,
+                                  "element": {
+                                    "kind": "ElementReference",
+                                    "name": "panel-11"
+                                  }
+                                }
+                              },
+                              {
+                                "kind": "GridLayoutItem",
+                                "spec": {
+                                  "x": 16,
+                                  "y": 4,
+                                  "width": 8,
+                                  "height": 4,
+                                  "element": {
+                                    "kind": "ElementReference",
+                                    "name": "panel-12"
+                                  }
+                                }
+                              },
+                              {
+                                "kind": "GridLayoutItem",
+                                "spec": {
+                                  "x": 0,
+                                  "y": 8,
+                                  "width": 8,
+                                  "height": 4,
+                                  "element": {
+                                    "kind": "ElementReference",
+                                    "name": "panel-14"
+                                  }
+                                }
+                              },
+                              {
+                                "kind": "GridLayoutItem",
+                                "spec": {
+                                  "x": 8,
+                                  "y": 8,
+                                  "width": 8,
+                                  "height": 4,
+                                  "element": {
+                                    "kind": "ElementReference",
+                                    "name": "panel-18"
+                                  }
+                                }
+                              },
+                              {
+                                "kind": "GridLayoutItem",
+                                "spec": {
+                                  "x": 16,
+                                  "y": 8,
+                                  "width": 8,
                                   "height": 4,
                                   "element": {
                                     "kind": "ElementReference",
@@ -12743,6 +13819,45 @@
                                     "name": "panel-42"
                                   }
                                 }
+                              },
+                              {
+                                "kind": "GridLayoutItem",
+                                "spec": {
+                                  "x": 0,
+                                  "y": 4,
+                                  "width": 8,
+                                  "height": 4,
+                                  "element": {
+                                    "kind": "ElementReference",
+                                    "name": "panel-51"
+                                  }
+                                }
+                              },
+                              {
+                                "kind": "GridLayoutItem",
+                                "spec": {
+                                  "x": 8,
+                                  "y": 4,
+                                  "width": 8,
+                                  "height": 4,
+                                  "element": {
+                                    "kind": "ElementReference",
+                                    "name": "panel-52"
+                                  }
+                                }
+                              },
+                              {
+                                "kind": "GridLayoutItem",
+                                "spec": {
+                                  "x": 16,
+                                  "y": 4,
+                                  "width": 8,
+                                  "height": 4,
+                                  "element": {
+                                    "kind": "ElementReference",
+                                    "name": "panel-53"
+                                  }
+                                }
                               }
                             ]
                           }
@@ -12882,11 +13997,24 @@
                                 "spec": {
                                   "x": 0,
                                   "y": 10,
-                                  "width": 24,
+                                  "width": 12,
                                   "height": 20,
                                   "element": {
                                     "kind": "ElementReference",
                                     "name": "panel-50"
+                                  }
+                                }
+                              },
+                              {
+                                "kind": "GridLayoutItem",
+                                "spec": {
+                                  "x": 12,
+                                  "y": 10,
+                                  "width": 12,
+                                  "height": 20,
+                                  "element": {
+                                    "kind": "ElementReference",
+                                    "name": "panel-54"
                                   }
                                 }
                               }
@@ -12992,6 +14120,45 @@
                                   "element": {
                                     "kind": "ElementReference",
                                     "name": "panel-65"
+                                  }
+                                }
+                              },
+                              {
+                                "kind": "GridLayoutItem",
+                                "spec": {
+                                  "x": 0,
+                                  "y": 4,
+                                  "width": 8,
+                                  "height": 4,
+                                  "element": {
+                                    "kind": "ElementReference",
+                                    "name": "panel-81"
+                                  }
+                                }
+                              },
+                              {
+                                "kind": "GridLayoutItem",
+                                "spec": {
+                                  "x": 8,
+                                  "y": 4,
+                                  "width": 8,
+                                  "height": 4,
+                                  "element": {
+                                    "kind": "ElementReference",
+                                    "name": "panel-82"
+                                  }
+                                }
+                              },
+                              {
+                                "kind": "GridLayoutItem",
+                                "spec": {
+                                  "x": 16,
+                                  "y": 4,
+                                  "width": 8,
+                                  "height": 4,
+                                  "element": {
+                                    "kind": "ElementReference",
+                                    "name": "panel-83"
                                   }
                                 }
                               }

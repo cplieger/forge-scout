@@ -2,6 +2,7 @@ package collect
 
 import (
 	"cmp"
+	"log/slog"
 	"slices"
 	"strings"
 	"time"
@@ -168,12 +169,17 @@ func nearestRank(sorted []time.Duration, p int) time.Duration {
 	return sorted[max(rank, 1)-1]
 }
 
-// from classifies an author against the connection's own account.
-func from(r *connResult, author string) string {
+// from classifies an author against the connection's own account. The forge's
+// account kind decides bot over the login, because a GitHub App's GraphQL login
+// carries no [bot] suffix; bot_authors names bot accounts the forge counts as
+// people.
+func from(r *connResult, author string, kind forge.AccountKind) string {
 	switch {
 	case author != "" && strings.EqualFold(author, r.login):
 		return fromYou
-	case strings.HasSuffix(strings.ToLower(author), "[bot]") || r.cfg.BotAuthors[strings.ToLower(author)]:
+	case kind == forge.AccountBot || r.cfg.BotAuthors[strings.ToLower(author)]:
+		return fromBot
+	case kind == forge.AccountUnknown && strings.HasSuffix(strings.ToLower(author), "[bot]"):
 		return fromBot
 	default:
 		return fromOthers
@@ -217,26 +223,35 @@ func (b *ageBuckets) add(now, created, updated time.Time) {
 	}
 }
 
-// severityRank orders code-scanning severities, most severe first.
-func severityRank(s string) int {
-	switch strings.ToLower(s) {
-	case "critical":
-		return 0
-	case "high":
-		return 1
-	case "medium":
-		return 2
-	case "low":
-		return 3
-	default:
-		return 4
+// attrs is the counts as scan complete fields, each name ending in suffix.
+func (b *ageBuckets) attrs(suffix string) []slog.Attr {
+	return []slog.Attr{
+		slog.Int("open_age_lt7d"+suffix, b.lt7), slog.Int("open_age_7_30d"+suffix, b.d7to30), slog.Int("open_age_30_90d"+suffix, b.d30to90),
+		slog.Int("open_age_90d_plus"+suffix, b.d90plus), slog.Int("open_age_unknown"+suffix, b.ageUnknown),
+		slog.Int("idle_30d"+suffix, b.idle30), slog.Int("idle_unknown"+suffix, b.idleUnknown),
 	}
 }
 
-// severityBucket is the scan complete field suffix for a severity.
-func severityBucket(s string) string {
-	return [...]string{"critical", "high", "medium", "low", "unrated"}[severityRank(s)]
+// severityBuckets name an alert's severity, most severe first, as the scan
+// complete field suffix it counts under: its security severity, else, for an
+// alert with none, its problem severity, else unrated.
+var severityBuckets = [...]string{"critical", "high", "medium", "low", "unrated_error", "unrated_warning", "unrated_note", "unrated"}
+
+// severityRank orders code-scanning alerts, most severe first, as
+// severityBuckets lists them. An alert whose security severity is one GitHub
+// does not document is unrated, not ranked by its problem severity, because it
+// has a security severity.
+func severityRank(a *forge.Alert) int {
+	for i, b := range severityBuckets {
+		if b == a.SecuritySeverity || (a.SecuritySeverity == "" && b == "unrated_"+a.ProblemSeverity) {
+			return i
+		}
+	}
+	return len(severityBuckets) - 1
 }
+
+// severityBucket is the scan complete field suffix a counts under.
+func severityBucket(a *forge.Alert) string { return severityBuckets[severityRank(a)] }
 
 // ranked is one row of a snapshot family with its connection.
 type ranked[T any] struct {
@@ -329,7 +344,7 @@ func lessDisabled(a, b *forge.Workflow) int {
 }
 
 func lessAlert(a, b *forge.Alert) int {
-	return cmp.Or(cmp.Compare(severityRank(a.Severity), severityRank(b.Severity)), oldestKnownFirst(a.CreatedAt, b.CreatedAt),
+	return cmp.Or(cmp.Compare(severityRank(a), severityRank(b)), oldestKnownFirst(a.CreatedAt, b.CreatedAt),
 		cmp.Compare(a.Repo, b.Repo), cmp.Compare(a.Number, b.Number))
 }
 

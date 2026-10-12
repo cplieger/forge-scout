@@ -558,7 +558,10 @@ func (r *connResult) addPRs(prs []forge.PullRequest) {
 		if !r.inKept(famPRs, "pull request", pr.Repo) || !r.firstSeen("pr", pr.Repo, pr.Number) {
 			continue
 		}
-		it := config.Item{Kind: config.KindPullRequest, Repo: pr.Repo, Author: pr.Author, Title: pr.Title, Labels: pr.Labels, Draft: pr.Draft}
+		it := config.Item{
+			Kind: config.KindPullRequest, Repo: pr.Repo, Author: pr.Author, Title: pr.Title, Labels: pr.Labels, Draft: pr.Draft,
+			Bot: pr.AuthorKind == forge.AccountBot,
+		}
 		if rule, ok := r.cfg.Excluded(&it); ok {
 			r.ledger.drop(famPRs, dropExcludedItem, 1)
 			r.logExcluded("pull request", &it, pr.Number, rule)
@@ -574,7 +577,7 @@ func (r *connResult) addIssues(issues []forge.Issue) {
 		if !r.inKept(famIssues, "issue", is.Repo) || !r.firstSeen("issue", is.Repo, is.Number) {
 			continue
 		}
-		it := config.Item{Kind: config.KindIssue, Repo: is.Repo, Author: is.Author, Title: is.Title, Labels: is.Labels}
+		it := config.Item{Kind: config.KindIssue, Repo: is.Repo, Author: is.Author, Title: is.Title, Labels: is.Labels, Bot: is.AuthorKind == forge.AccountBot}
 		if rule, ok := r.cfg.Excluded(&it); ok {
 			r.ledger.drop(famIssues, dropExcludedItem, 1)
 			r.logExcluded("issue", &it, is.Number, rule)

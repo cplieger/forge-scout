@@ -791,6 +791,42 @@ func TestScan_slow_workflows_need_three_timed_runs(t *testing.T) {
 	}
 }
 
+// TestScan_from_reads_the_forges_account_kind_first scans what GitHub's GraphQL
+// answers for a GitHub App, the login tribble-trouble with no [bot] suffix and
+// the kind Bot, beside the cases the kind settles and the ones the login still
+// does.
+func TestScan_from_reads_the_forges_account_kind_first(t *testing.T) {
+	ep := githubEndpoint("gh")
+	ep.cfg.BotAuthors = map[string]bool{"renovate-bot": true}
+	pr := func(n int, author string, kind forge.AccountKind) forge.PullRequest {
+		return forge.PullRequest{Repo: "o/r", Number: n, Ref: "#" + strconv.Itoa(n), Author: author, AuthorKind: kind, UpdatedAt: now}
+	}
+	ep.conn.prs = map[string][]forge.PullRequest{"o": {
+		pr(1, "tribble-trouble", forge.AccountBot),
+		pr(2, "renovate-bot", forge.AccountUser),
+		pr(3, "dependabot[bot]", forge.AccountUnknown),
+		pr(4, "looks-like[bot]", forge.AccountUser),
+		pr(5, "me", forge.AccountBot),
+		pr(6, "stranger", forge.AccountUnknown),
+	}}
+	ep.conn.issues = map[string][]forge.Issue{"o": {{Repo: "o/r", Number: 7, Author: "tribble-trouble", AuthorKind: forge.AccountBot, UpdatedAt: now}}}
+	h := newHarness(t, ep)
+	h.scan(t)
+	got := map[string]string{}
+	for _, l := range append(lines(h.rec, "open pull request"), lines(h.rec, "open issue")...) {
+		got[l["number"]] = l["from"]
+	}
+	want := map[string]string{"1": "bot", "2": "bot", "3": "bot", "4": "someone_else", "5": "you", "6": "someone_else", "7": "bot"}
+	for number, from := range want {
+		if got[number] != from {
+			t.Errorf("#%s from = %q, want %q", number, got[number], from)
+		}
+	}
+	if c := lineFor(t, h.rec, "scan complete", "gh"); c["from_others_prs"] != "2" || c["from_others_issues"] != "0" {
+		t.Errorf("scan complete from_others_prs %q from_others_issues %q, want 2 and 0", c["from_others_prs"], c["from_others_issues"])
+	}
+}
+
 func TestScan_open_work_carries_origin_age_and_checks(t *testing.T) {
 	ep := githubEndpoint("gh")
 	ep.cfg.BotAuthors = map[string]bool{"helper": true}
@@ -825,7 +861,7 @@ func TestScan_open_work_carries_origin_age_and_checks(t *testing.T) {
 	c := lineFor(t, h.rec, "scan complete", "gh")
 	want := map[string]string{
 		"open_prs": "4", "from_others_prs": "1", "failing_checks_prs": "1", "checks_unread": "3",
-		"open_age_30_90d": "4", "idle_30d": "1",
+		"open_age_30_90d_prs": "4", "idle_30d_prs": "1",
 	}
 	for k, v := range want {
 		if c[k] != v {
@@ -852,9 +888,41 @@ func TestScan_age_buckets(t *testing.T) {
 	h := newHarness(t, ep)
 	h.scan(t)
 	c := lineFor(t, h.rec, "scan complete", "gh")
-	for k, v := range map[string]string{"open_age_lt7d": "2", "open_age_7_30d": "1", "open_age_30_90d": "2", "open_age_90d_plus": "1", "idle_30d": "1", "open_issues": "6"} {
+	for k, v := range map[string]string{
+		"open_age_lt7d_issues": "2", "open_age_7_30d_issues": "1", "open_age_30_90d_issues": "2", "open_age_90d_plus_issues": "1",
+		"idle_30d_issues": "1", "open_issues": "6",
+	} {
 		if c[k] != v {
 			t.Errorf("scan complete %s = %q, want %q", k, c[k], v)
+		}
+	}
+}
+
+// TestScan_age_counts_are_per_family scans one pull request touched today
+// and one issue idle for 31 days: each family counts only its own items.
+func TestScan_age_counts_are_per_family(t *testing.T) {
+	ep := githubEndpoint("gh")
+	ep.conn.prs = map[string][]forge.PullRequest{"o": {{Repo: "o/r", Number: 1, Author: "x", CreatedAt: now.Add(-2 * 24 * time.Hour), UpdatedAt: now}}}
+	ep.conn.issues = map[string][]forge.Issue{"o": {
+		{Repo: "o/r", Number: 2, Author: "x", CreatedAt: now.Add(-100 * 24 * time.Hour), UpdatedAt: now.Add(-31 * 24 * time.Hour)},
+	}}
+	h := newHarness(t, ep)
+	h.scan(t)
+	c := lineFor(t, h.rec, "scan complete", "gh")
+	want := map[string]string{
+		"idle_30d_prs": "0", "idle_30d_issues": "1", "idle_unknown_prs": "0", "idle_unknown_issues": "0",
+		"open_age_lt7d_prs": "1", "open_age_lt7d_issues": "0", "open_age_7_30d_prs": "0", "open_age_7_30d_issues": "0",
+		"open_age_30_90d_prs": "0", "open_age_30_90d_issues": "0", "open_age_90d_plus_prs": "0", "open_age_90d_plus_issues": "1",
+		"open_age_unknown_prs": "0", "open_age_unknown_issues": "0",
+	}
+	for k, v := range want {
+		if c[k] != v {
+			t.Errorf("scan complete %s = %q, want %q", k, c[k], v)
+		}
+	}
+	for _, k := range []string{"idle_30d", "idle_unknown", "open_age_lt7d", "open_age_7_30d", "open_age_30_90d", "open_age_90d_plus", "open_age_unknown"} {
+		if v, ok := c[k]; ok {
+			t.Errorf("scan complete carries %s = %q, a count of both families, want it absent", k, v)
 		}
 	}
 }
@@ -1128,7 +1196,8 @@ func TestScan_open_work_with_no_reported_time_is_unknown_not_new(t *testing.T) {
 	}
 	c := lineFor(t, h.rec, "scan complete", "gh")
 	want := map[string]string{
-		"open_age_lt7d": "1", "open_age_30_90d": "1", "open_age_unknown": "2", "idle_30d": "1", "idle_unknown": "2",
+		"open_age_30_90d_prs": "1", "open_age_unknown_prs": "1", "idle_unknown_prs": "1", "idle_30d_prs": "0",
+		"open_age_lt7d_issues": "1", "open_age_unknown_issues": "1", "idle_30d_issues": "1", "idle_unknown_issues": "1",
 	}
 	for k, v := range want {
 		if c[k] != v {
@@ -1162,13 +1231,14 @@ func TestScan_a_blind_pr_family_emits_no_rows(t *testing.T) {
 	if !strings.Contains(c["failed_signals"], "open_prs") {
 		t.Errorf("failed_signals = %q, want open_prs", c["failed_signals"])
 	}
-	for _, k := range []string{"open_prs", "open_age_lt7d", "failing_checks_prs"} {
+	for _, k := range []string{"open_prs", "open_age_lt7d_prs", "idle_30d_prs", "idle_unknown_prs", "failing_checks_prs"} {
 		if _, ok := c[k]; ok {
 			t.Errorf("scan complete carries %s = %s for a blind family, want it absent", k, c[k])
 		}
 	}
-	if c["open_issues"] != "1" {
-		t.Errorf("scan complete open_issues = %q, want 1", c["open_issues"])
+	if c["open_issues"] != "1" || c["open_age_unknown_issues"] != "1" || c["idle_unknown_issues"] != "1" || c["idle_30d_issues"] != "0" {
+		t.Errorf("scan complete open_issues %q open_age_unknown_issues %q idle_unknown_issues %q idle_30d_issues %q, want 1, 1, 1 and 0: the whole issue read keeps its counts",
+			c["open_issues"], c["open_age_unknown_issues"], c["idle_unknown_issues"], c["idle_30d_issues"])
 	}
 }
 
@@ -1530,10 +1600,10 @@ func TestScan_github_only_signals(t *testing.T) {
 		forge.Repo{Path: "o/fork", Fork: true}, forge.Repo{Path: "o/none"}, forge.Repo{Path: "o/private", Private: true}, forge.Repo{Path: "o/skip"})
 	gh.cfg.Security.SkipRepos = map[string]bool{"o/skip": true}
 	gh.gh.alerts = map[string][]forge.Alert{"o/r": {
-		{Repo: "o/r", Number: 1, Severity: "high", Tool: "CodeQL", Source: "code_scanning"},
-		{Repo: "o/r", Number: 2, Severity: "critical", Tool: "CodeQL", Source: "code_scanning"},
+		{Repo: "o/r", Number: 1, SecuritySeverity: "high", Tool: "CodeQL", Source: "code_scanning"},
+		{Repo: "o/r", Number: 2, SecuritySeverity: "critical", Tool: "CodeQL", Source: "code_scanning"},
 		{Repo: "o/r", Number: 3, Tool: "Trivy", Source: "code_scanning"},
-	}, "o/private": {{Repo: "o/private", Number: 9, Severity: "high", Tool: "CodeQL", Source: "code_scanning"}}}
+	}, "o/private": {{Repo: "o/private", Number: 9, SecuritySeverity: "high", Tool: "CodeQL", Source: "code_scanning"}}}
 	gh.gh.none = map[string]bool{"o/none": true}
 	gh.gh.workflows = map[string][]forge.Workflow{"o/r": {{Repo: "o/r", Name: "nightly", State: "disabled_inactivity"}}}
 	gt := giteaEndpoint("gt")
@@ -1575,7 +1645,7 @@ func TestScan_include_private_reads_code_scanning_of_a_private_repository(t *tes
 	ep := githubEndpoint("gh")
 	ep.conn.repos["o"] = []forge.Repo{{Path: "o/p", DefaultBranch: "main", Private: true}}
 	ep.cfg.Security.IncludePrivate = true
-	ep.gh.alerts = map[string][]forge.Alert{"o/p": {{Repo: "o/p", Number: 1, Severity: "high", Tool: "CodeQL", Source: "code_scanning"}}}
+	ep.gh.alerts = map[string][]forge.Alert{"o/p": {{Repo: "o/p", Number: 1, SecuritySeverity: "high", Tool: "CodeQL", Source: "code_scanning"}}}
 	h := newHarness(t, ep)
 	h.scan(t)
 	c := lineFor(t, h.rec, "scan complete", "gh")
@@ -1690,11 +1760,57 @@ func TestScan_code_scanning_blind_escalates(t *testing.T) {
 	}
 }
 
+func TestScan_an_alert_with_no_security_severity_ranks_and_counts_by_its_problem_severity(t *testing.T) {
+	ep := githubEndpoint("gh")
+	ep.gh.alerts = map[string][]forge.Alert{"o/r": {
+		{Repo: "o/r", Number: 1, ProblemSeverity: "warning", Tool: "deadset"},
+		{Repo: "o/r", Number: 2, ProblemSeverity: "error", Tool: "deadset"},
+		{Repo: "o/r", Number: 3, SecuritySeverity: "low", ProblemSeverity: "warning", Tool: "CodeQL"},
+		{Repo: "o/r", Number: 4, Tool: "t"},
+		{Repo: "o/r", Number: 5, ProblemSeverity: "note", Tool: "deadset"},
+		{Repo: "o/r", Number: 6, ProblemSeverity: "none", Tool: "t"},
+		{Repo: "o/r", Number: 7, SecuritySeverity: "unknown", ProblemSeverity: "error", Tool: "t"},
+	}}
+	h := newHarness(t, ep)
+	h.scan(t)
+	got := map[string]map[string]string{}
+	for _, l := range lines(h.rec, "security alert") {
+		got[l["number"]] = l
+	}
+	if l := got["2"]; l["problem_severity"] != "error" || l["security_severity"] != "" {
+		t.Errorf("the deadset alert #2 = %v, want problem_severity error and no security severity", l)
+	}
+	if v, ok := got["2"]["severity"]; ok {
+		t.Errorf("alert #2 carries severity = %q, want the two named fields only", v)
+	}
+	for number, rank := range map[string]string{"3": "1", "2": "2", "1": "3", "5": "4"} {
+		if got[number]["rank"] != rank {
+			t.Errorf("alert #%s rank = %q, want %s: security severity first, then error, warning and note", number, got[number]["rank"], rank)
+		}
+	}
+	for _, number := range []string{"4", "6", "7"} {
+		if r := got[number]["rank"]; r != "5" && r != "6" && r != "7" {
+			t.Errorf("alert #%s rank = %q, want one of the last three: it has no known security severity and no problem severity that counts", number, r)
+		}
+	}
+	c := lineFor(t, h.rec, "scan complete", "gh")
+	want := map[string]string{
+		"security_alerts": "7", "security_alerts_low": "1", "security_alerts_critical": "0",
+		"security_alerts_unrated_error": "1", "security_alerts_unrated_warning": "1", "security_alerts_unrated_note": "1",
+		"security_alerts_unrated": "3",
+	}
+	for k, v := range want {
+		if c[k] != v {
+			t.Errorf("scan complete %s = %q, want %q", k, c[k], v)
+		}
+	}
+}
+
 func TestScan_an_alert_with_no_reported_time_ranks_after_the_dated_ones(t *testing.T) {
 	ep := githubEndpoint("gh")
 	ep.gh.alerts = map[string][]forge.Alert{"o/r": {
-		{Repo: "o/r", Number: 1, Severity: "high", Tool: "t"},
-		{Repo: "o/r", Number: 2, Severity: "high", Tool: "t", CreatedAt: now.Add(-time.Hour)},
+		{Repo: "o/r", Number: 1, SecuritySeverity: "high", Tool: "t"},
+		{Repo: "o/r", Number: 2, SecuritySeverity: "high", Tool: "t", CreatedAt: now.Add(-time.Hour)},
 	}}
 	h := newHarness(t, ep)
 	h.scan(t)
@@ -1716,7 +1832,7 @@ func TestScan_alerts_and_tools_are_capped(t *testing.T) {
 		ep := githubEndpoint("gh" + strconv.Itoa(i))
 		var alerts []forge.Alert
 		for n := range 400 {
-			alerts = append(alerts, forge.Alert{Repo: "o/r", Number: int64(n), Severity: "low", Tool: "tool-" + strconv.Itoa(n%13)})
+			alerts = append(alerts, forge.Alert{Repo: "o/r", Number: int64(n), SecuritySeverity: "low", Tool: "tool-" + strconv.Itoa(n%13)})
 		}
 		ep.gh.alerts = map[string][]forge.Alert{"o/r": alerts}
 		eps = append(eps, ep)
@@ -1751,7 +1867,7 @@ func TestScan_security_tools_rank_across_connections_and_mark_the_rollup(t *test
 	var alerts []forge.Alert
 	add := func(tool string, n int) {
 		for range n {
-			alerts = append(alerts, forge.Alert{Repo: "o/r", Number: int64(len(alerts) + 1), Severity: "low", Tool: tool})
+			alerts = append(alerts, forge.Alert{Repo: "o/r", Number: int64(len(alerts) + 1), SecuritySeverity: "low", Tool: tool})
 		}
 	}
 	add("other", 50)
@@ -1760,7 +1876,7 @@ func TestScan_security_tools_rank_across_connections_and_mark_the_rollup(t *test
 	}
 	a.gh.alerts = map[string][]forge.Alert{"o/r": alerts}
 	b.gh.alerts = map[string][]forge.Alert{"o/r": {
-		{Repo: "o/r", Number: 1, Severity: "low", Tool: "tool-9"}, {Repo: "o/r", Number: 2, Severity: "low", Tool: "tool-9"},
+		{Repo: "o/r", Number: 1, SecuritySeverity: "low", Tool: "tool-9"}, {Repo: "o/r", Number: 2, SecuritySeverity: "low", Tool: "tool-9"},
 	}}
 	h := newHarness(t, a, b)
 	h.scan(t)
@@ -2532,9 +2648,9 @@ func TestScan_a_blind_github_only_family_logs_no_count(t *testing.T) {
 func TestScan_security_lines_rank_across_connections(t *testing.T) {
 	a, b := githubEndpoint("a"), githubEndpoint("b")
 	a.gh.alerts = map[string][]forge.Alert{"o/r": {
-		{Repo: "o/r", Number: 1, Severity: "low", Tool: "Trivy"}, {Repo: "o/r", Number: 2, Severity: "low", Tool: "Trivy"},
+		{Repo: "o/r", Number: 1, SecuritySeverity: "low", Tool: "Trivy"}, {Repo: "o/r", Number: 2, SecuritySeverity: "low", Tool: "Trivy"},
 	}}
-	b.gh.alerts = map[string][]forge.Alert{"o/r": {{Repo: "o/r", Number: 3, Severity: "critical", Tool: "CodeQL"}}}
+	b.gh.alerts = map[string][]forge.Alert{"o/r": {{Repo: "o/r", Number: 3, SecuritySeverity: "critical", Tool: "CodeQL"}}}
 	h := newHarness(t, a, b)
 	h.scan(t)
 	for _, msg := range []string{"security alert", "top security alert", "security tool"} {

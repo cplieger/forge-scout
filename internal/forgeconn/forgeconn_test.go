@@ -353,6 +353,35 @@ func TestOpenPRs_maps_rows(t *testing.T) {
 	}
 }
 
+// TestOpenPRs_and_OpenIssues_carry_the_author_kind holds each kind forgeapi
+// names to the row: a GitHub App's GraphQL login carries no [bot] suffix, so the
+// kind is the only thing that says it is a bot.
+func TestOpenPRs_and_OpenIssues_carry_the_author_kind(t *testing.T) {
+	for in, want := range map[forgeapi.AccountKind]forge.AccountKind{
+		forgeapi.AccountKindBot: forge.AccountBot, forgeapi.AccountKindUser: forge.AccountUser, forgeapi.AccountKindUnknown: forge.AccountUnknown,
+	} {
+		f := &fakeAPI{
+			myPRs: func(...forgeapi.ListOption) (forgeapi.Page[forgeapi.PullRequest], error) {
+				page := prPage(7, nil)
+				page.Items[0].Author, page.Items[0].AuthorKind = "tribble-trouble", in
+				return page, nil
+			},
+			myIssues: func(...forgeapi.ListOption) (forgeapi.Page[forgeapi.Issue], error) {
+				return forgeapi.Page[forgeapi.Issue]{Items: []forgeapi.Issue{{Ref: forgeapi.IssueRef{Number: 8}, Author: "tribble-trouble", AuthorKind: in}}}, nil
+			},
+		}
+		c := client(t, f)
+		prs, err := c.OpenPRs(t.Context(), "o")
+		if err != nil || len(prs) != 1 || prs[0].AuthorKind != want {
+			t.Errorf("OpenPRs(author kind %v) = %+v, %v, want one row of kind %v", in, prs, err, want)
+		}
+		issues, err := c.OpenIssues(t.Context(), "o")
+		if err != nil || len(issues) != 1 || issues[0].AuthorKind != want {
+			t.Errorf("OpenIssues(author kind %v) = %+v, %v, want one row of kind %v", in, issues, err, want)
+		}
+	}
+}
+
 func TestOpenPRs_partial_answers(t *testing.T) {
 	tests := []struct {
 		pages []forgeapi.Page[forgeapi.PullRequest]
