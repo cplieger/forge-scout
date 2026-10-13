@@ -695,3 +695,21 @@ func TestHTTPClient_dials_a_private_address_only_when_the_connection_allows_it(t
 		})
 	}
 }
+
+func TestReads_a_rate_limit_carries_the_rest_pools_budget(t *testing.T) {
+	reset := time.Now().Add(time.Hour).Truncate(time.Second).UTC()
+	c := newClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-RateLimit-Remaining", "0")
+		w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(reset.Unix(), 10))
+		w.WriteHeader(http.StatusForbidden)
+	})
+	_, err := c.CodeScanningAlerts(t.Context(), repo)
+	bs, ok := errors.AsType[*forge.BudgetStopError](err)
+	if !errors.Is(err, forge.ErrRateLimited) || !ok || bs.Budget.Remaining != 0 || !bs.Budget.Reset.Equal(reset) {
+		t.Errorf("CodeScanningAlerts on a spent budget = %v, want forge.ErrRateLimited carrying the REST pool's 0 until %s", err, reset)
+	}
+	_, err = c.Workflows(t.Context(), repo)
+	if bs, ok := errors.AsType[*forge.BudgetStopError](err); !errors.Is(err, forge.ErrReadDeferred) || !ok || !bs.Budget.Reset.Equal(reset) {
+		t.Errorf("Workflows held at the reserve = %v, want forge.ErrReadDeferred carrying the REST pool's budget", err)
+	}
+}

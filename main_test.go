@@ -308,6 +308,85 @@ func TestScan_a_connection_stopped_at_the_reserve_resumes_once_its_window_renews
 	}
 }
 
+// TestScan_a_second_scan_is_answered_from_the_read_cache drives two scans
+// through the real adapters against a GitHub and a GitLab fake that send
+// validators: the second reuses each connection, every unchanged forgeapi
+// REST read is revalidated, and GitHub bills none of those while GitLab bills
+// each. The code-scanning and workflow reads are not cached.
+func TestScan_a_second_scan_is_answered_from_the_read_cache(t *testing.T) {
+	rec := capture.Default(t)
+	if left := time.Until(time.Now().Truncate(time.Hour).Add(time.Hour)); left < 10*time.Second {
+		// Both scans must ask one hour's run window.
+		time.Sleep(left + time.Second)
+	}
+	w := world("acme")
+	w.Validators = true
+	gh := forgeconntest.New(forgeconntest.GitHub, w)
+	t.Cleanup(gh.Close)
+	gl := forgeconntest.New(forgeconntest.GitLab, w)
+	t.Cleanup(gl.Close)
+	hub, lab := gh.Connection("hub"), gl.Connection("lab")
+	lab.Security = config.Security{}
+	cfg := config.Config{Lookback: 72 * time.Hour, ScanInterval: 15 * time.Minute, Connections: []config.Connection{hub, lab}}
+	c := newCollector(t.Context(), &cfg, slog.Default(), testStore(t))
+	t.Cleanup(c.Close)
+	scans := make([]map[string]map[string]int, 2)
+	for i := range scans {
+		from := rec.Len()
+		if got := c.Scan(t.Context()); got != collect.Complete {
+			t.Fatalf("scan %d = %s, want complete; messages %v", i+1, got, rec.Messages())
+		}
+		scans[i] = completeCounts(rec.Records()[from:])
+	}
+	first, second := scans[0], scans[1]
+	t.Logf("first scan %v\nsecond scan %v", first, second)
+	if h, f := second["hub"], first["hub"]; h["cache_hits"] == 0 || h["cache_saved"] != h["cache_hits"] || h["requests_open"] != 0 || h["requests_runs"] != 0 ||
+		h["requests_workflows"] != f["requests_workflows"] || h["requests_code_scanning"] != f["requests_code_scanning"] {
+		t.Errorf("second GitHub scan = %v, first %v: want cache hits, every one saved, no billed open or run request, and the uncached workflow and code-scanning reads billed as before", h, f)
+	}
+	if h := first["hub"]; h["requests_runs"] == 0 || h["requests_workflows"] == 0 || h["requests_code_scanning"] == 0 || h["cache_hits"] != 0 {
+		t.Errorf("first GitHub scan = %v, want each REST read billed and no hit", h)
+	}
+	if l := second["lab"]; l["cache_hits"] == 0 || l["cache_saved"] != 0 || l["requests_open"] != 0 || l["requests_runs"] != first["lab"]["requests_runs"] {
+		t.Errorf("second GitLab scan = %v, first %v: want cache hits, none saved, and each 304 billed as the first scan's read was", l, first["lab"])
+	}
+	for name, srv := range map[string]*forgeconntest.Server{"hub": gh, "lab": gl} {
+		accounts := 0
+		for _, r := range srv.Requests() {
+			if strings.HasSuffix(r, "/user") {
+				accounts++
+			}
+		}
+		if accounts != 1 {
+			t.Errorf("connection %s read its account %d times over two scans, want once: the connection and its cache are kept", name, accounts)
+		}
+	}
+}
+
+// completeCounts is each connection's integer scan complete fields among
+// records.
+func completeCounts(records []slog.Record) map[string]map[string]int {
+	out := map[string]map[string]int{}
+	for _, r := range records {
+		if r.Message != "scan complete" {
+			continue
+		}
+		var conn string
+		fields := map[string]int{}
+		r.Attrs(func(a slog.Attr) bool {
+			if a.Key == "connection" {
+				conn = a.Value.String()
+			}
+			if a.Value.Kind() == slog.KindInt64 {
+				fields[a.Key] = int(a.Value.Int64())
+			}
+			return true
+		})
+		out[conn] = fields
+	}
+	return out
+}
+
 // TestScan_a_cold_open_at_the_reserve_reports_the_budget_detection_read
 // starts against a GitHub fake whose detection answer reports the reserve,
 // so the account read is deferred inside the open, then scans again after

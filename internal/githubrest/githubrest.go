@@ -373,20 +373,31 @@ func (c *Client) attempt(ctx context.Context, reqURL string) ([]byte, error) {
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("X-GitHub-Api-Version", c.version)
 	resp, err := c.http.Do(req)
-	for _, held := range []error{forge.ErrReadDeferred, forge.ErrRefused} {
-		if errors.Is(err, held) {
-			return nil, held
-		}
+	if bs, ok := errors.AsType[*forge.BudgetStopError](err); ok {
+		return nil, bs
+	}
+	if errors.Is(err, forge.ErrRefused) {
+		return nil, forge.ErrRefused
 	}
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	if err := statusError(resp); err != nil {
+	if err := c.statusError(resp); err != nil {
 		httpx.Drain(resp.Body)
 		return nil, err
 	}
 	return httpx.ReadLimitedBody(resp.Body, bodyCap)
+}
+
+// statusError is the package statusError, a rate limit carrying the budget
+// the shared REST pool reports after the answer that refused it.
+func (c *Client) statusError(resp *http.Response) error {
+	err := statusError(resp)
+	if errors.Is(err, forge.ErrRateLimited) {
+		return &forge.BudgetStopError{Err: err, Budget: c.meter.Budget()}
+	}
+	return err
 }
 
 // statusError classifies a non-2xx answer on its status code and headers,

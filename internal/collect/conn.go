@@ -68,8 +68,11 @@ type connResult struct {
 	// no repository at all.
 	ownersEmpty []string
 	cfg         *config.Connection
-	budget      forge.Budget
-	login       string
+	// stopBudget is the budget of the pool whose read stopped the scan, nil
+	// when no read reported one.
+	stopBudget *forge.Budget
+	budget     forge.Budget
+	login      string
 	// phase is the read under way, which a stop records.
 	phase    string
 	prs      []prRow
@@ -79,8 +82,10 @@ type connResult struct {
 	failing  []failingRow
 	slow     []slowRow
 	days     []runstate.DayCount
+	book     requestBook
 	ledger   readLedger
 	sum      summary
+	cache    forge.ReadCache
 	product  forge.Product
 }
 
@@ -111,10 +116,11 @@ func (c *Collector) scanConn(ctx context.Context, sc *scan, cs *connState) *conn
 	r := &connResult{
 		cfg: &cs.cfg, kept: map[string]forge.Repo{}, dropped: map[string]bool{}, byOwner: map[string][]forge.Repo{},
 		defined: map[string]*definitions{}, seen: map[string]bool{}, unmapped: map[string]bool{},
-		budget: forge.Budget{Remaining: -1}, phase: phaseOpen,
+		budget: forge.Budget{Remaining: -1}, phase: phaseOpen, book: newRequestBook(cs.spent),
 	}
 	r.log = Scope(c.logger, forge.ProductUnknown, cs.cfg.Name)
 	opened := c.readConn(ctx, sc, cs, r)
+	r.book.charge(r.phase)
 	if r.ledger.stop == nil && errors.Is(context.Cause(ctx), errScanTimeout) {
 		r.ledger.timedOut = true
 		r.ledger.halt(stopScanTimeout, r.phase)
@@ -126,6 +132,10 @@ func (c *Collector) scanConn(ctx context.Context, sc *scan, cs *connState) *conn
 	if cs.gh != nil {
 		r.budget = cs.gh.Budget()
 	}
+	if r.stopBudget != nil {
+		r.budget = *r.stopBudget
+	}
+	r.cache = readCache(cs)
 	r.approve()
 	return r
 }
@@ -168,7 +178,7 @@ func (c *Collector) readConn(ctx context.Context, sc *scan, cs *connState, r *co
 		{c.readGitHub, phaseSecurity},
 	}
 	for _, step := range steps {
-		r.phase = step.phase
+		r.enter(step.phase)
 		// With no repository visible, every row a later read returns is dropped.
 		if err := step.read(ctx, sc, cs, r); err != nil || r.ledger.noRepos() {
 			break
@@ -298,12 +308,16 @@ func failureCause(l *readLedger, err error) string {
 }
 
 // stopped records err as the connection's stop in the read under way when it
-// is one. A forge refusing further requests also fails the read of f; a read
-// held back to keep the reserve fails nothing.
+// is one, with the budget of the pool that stopped it when err carries one. A
+// forge refusing further requests also fails the read of f; a read held back
+// to keep the reserve fails nothing.
 func (r *connResult) stopped(err error, f family) bool {
 	reason, stop := stopErr(err)
 	if !stop {
 		return false
+	}
+	if bs, ok := errors.AsType[*forge.BudgetStopError](err); ok {
+		r.stopBudget = &bs.Budget
 	}
 	if reason == stopRateLimited {
 		r.ledger.record(f, 0, err)
@@ -456,7 +470,7 @@ func (c *Collector) readSnapshots(ctx context.Context, _ *scan, cs *connState, r
 }
 
 func (c *Collector) ownerPRs(ctx context.Context, cs *connState, r *connResult, owner string) error {
-	r.phase = phasePRs
+	r.enter(phasePRs)
 	prs, err := cs.conn.OpenPRs(ctx, owner)
 	if errors.Is(err, forge.ErrOwnerUnresolved) {
 		return c.repoPRs(ctx, cs, r, owner)
@@ -470,7 +484,7 @@ func (c *Collector) ownerPRs(ctx context.Context, cs *connState, r *connResult, 
 }
 
 func (c *Collector) ownerIssues(ctx context.Context, cs *connState, r *connResult, owner string) error {
-	r.phase = phaseIssues
+	r.enter(phaseIssues)
 	issues, err := cs.conn.OpenIssues(ctx, owner)
 	if errors.Is(err, forge.ErrOwnerUnresolved) {
 		return c.repoIssues(ctx, cs, r, owner)
@@ -793,7 +807,7 @@ func (*Collector) readAlerts(ctx context.Context, cs *connState, r *connResult, 
 		r.ledger.drop(famSecurity, dropSecuritySkipped, 1)
 		return nil
 	}
-	r.phase = phaseSecurity
+	r.enter(phaseSecurity)
 	alerts, err := cs.gh.CodeScanningAlerts(ctx, repo)
 	if err != nil && (r.stopped(err, famSecurity) || isShutdown(ctx)) {
 		return errStopped
@@ -813,7 +827,7 @@ func (*Collector) readWorkflows(ctx context.Context, cs *connState, r *connResul
 		r.ledger.drop(famWorkflows, dropForkWorkflows, 1)
 		return nil
 	}
-	r.phase = phaseWorkflows
+	r.enter(phaseWorkflows)
 	wfs, err := cs.gh.Workflows(ctx, repo)
 	if err != nil && (r.stopped(err, famWorkflows) || isShutdown(ctx)) {
 		return errStopped

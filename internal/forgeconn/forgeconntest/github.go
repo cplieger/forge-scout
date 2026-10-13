@@ -171,8 +171,11 @@ func (s *Server) serveGitHubGraphQL(w http.ResponseWriter, r *http.Request) (str
 	}
 	line := "POST graphql " + req.OperationName
 	remaining, reset := s.budget()
+	s.mu.Lock()
+	cost := s.cost
+	s.mu.Unlock()
 	data := map[string]any{"rateLimit": map[string]any{
-		"cost": 1, "limit": 5000, "remaining": remaining, "resetAt": stamp(reset),
+		"cost": cost, "limit": 5000, "remaining": remaining, "resetAt": stamp(reset),
 	}}
 	var errs []map[string]any
 	switch req.OperationName {

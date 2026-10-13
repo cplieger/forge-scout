@@ -11,11 +11,13 @@ import (
 )
 
 // stopKeys are the keys a scan stopped line may carry beside its _read
-// fields: what the stop was, never a count or a row of the scan before it.
-var stopKeys = []string{
+// fields: what the stop was and what its own requests cost, never a count or
+// a row of the scan before it.
+var stopKeys = append([]string{
 	"level", "forge", "connection", "scan_id", "reason", "phase", "limit", "hint", "unsupported_signals",
 	"degraded", "failed_signals", "budget_remaining", "budget_reset", "scan_interval_s",
-}
+	"cache_hits", "cache_misses", "cache_saved",
+}, requestKeys...)
 
 func TestScan_a_stop_after_a_complete_scan_logs_no_snapshot_and_stores_none(t *testing.T) {
 	gh, gt := githubEndpoint("gh"), giteaEndpoint("gt")

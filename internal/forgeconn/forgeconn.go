@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"strconv"
 	"sync/atomic"
 	"time"
@@ -19,6 +20,7 @@ import (
 	"github.com/cplieger/github-scout/internal/config"
 	"github.com/cplieger/github-scout/internal/forge"
 	"github.com/cplieger/github-scout/internal/ghquota"
+	"github.com/cplieger/github-scout/internal/spend"
 )
 
 // Walk ceilings, in pages: each list call reads one page. Reaching one with a
@@ -49,7 +51,9 @@ type api interface {
 type Client struct {
 	api api
 	// meter admits each call on a GitHub connection, nil on any other.
-	meter   *ghquota.Meter
+	meter *ghquota.Meter
+	// spent counts every attempt the connection sends.
+	spent   *spend.Meter
 	login   string
 	product forge.Product
 }
@@ -60,10 +64,11 @@ type Client struct {
 // cancellation failure; one after the product is known is a *forge.OpenError
 // carrying the product and the budget the open's responses reported. logger
 // carries the connection: forgeapi's lines gain the product once it is named.
-// meter accounts every attempt, retries included, and admits each call of a
-// GitHub connection (see ghquota.Meter.Admit).
-func Open(ctx context.Context, c *config.Connection, logger *slog.Logger, meter *ghquota.Meter) (*Client, error) {
+// meter (see ghquota.Meter.Admit) and spent (see Client.price) see every
+// attempt, retries and the open's included.
+func Open(ctx context.Context, c *config.Connection, logger *slog.Logger, meter *ghquota.Meter, spent *spend.Meter) (*Client, error) {
 	stamp := &forgeHandler{inner: logger.Handler(), product: new(atomic.Int64)}
+	spent.Detect()
 	core, family, err := families.Open(ctx,
 		forgeapi.Connection{WebBaseURL: c.URL, APIBaseURL: c.APIURL},
 		forgeapi.WithCredentialSource(staticToken(c.Token)),
@@ -73,7 +78,9 @@ func Open(ctx context.Context, c *config.Connection, logger *slog.Logger, meter 
 		forgeapi.WithLogger(slog.New(stamp)),
 		forgeapi.WithPrivateAddresses(c.PrivateAddresses),
 		forgeapi.WithPlaintextHTTP(c.AllowPlaintext),
-		forgeapi.WithAttemptObserver(meter.ObserveAttempt),
+		forgeapi.WithAttemptObserver(func(next http.RoundTripper) http.RoundTripper {
+			return meter.ObserveAttempt(spent.Observe(next))
+		}),
 		forgeapi.WithRequestObserver(meter.ObserveRequest),
 	)
 	if err != nil {
@@ -81,15 +88,17 @@ func Open(ctx context.Context, c *config.Connection, logger *slog.Logger, meter 
 	}
 	// Armed as soon as the product is known, the meter reads the budget from
 	// the account read, before the first read of a scan.
-	client, err := newClient(ctx, core, family, c.Owners, func(p forge.Product) {
+	client, err := newClient(ctx, core, family, c.Owners, spent, func(p forge.Product) {
 		stamp.product.Store(int64(p))
+		spent.Name(p)
 		if p == forge.ProductGitHub {
 			meter.Arm()
 		}
 	})
 	if err != nil {
 		if oe, ok := errors.AsType[*forge.OpenError](err); ok {
-			b := budgetOf(core.BudgetState())
+			state := core.BudgetState()
+			b := budgetOf(&state)
 			oe.Budget = &b
 		}
 		core.Close()
@@ -129,8 +138,9 @@ func (h *forgeHandler) WithGroup(name string) slog.Handler {
 }
 
 // newClient identifies the connection on a, calling named with the product
-// as soon as the instance names it, before any later read.
-func newClient(ctx context.Context, a api, family forgeapi.Family, owners []string, named func(forge.Product)) (*Client, error) {
+// as soon as the instance names it, before any later read. spent is the
+// meter a's attempts go through.
+func newClient(ctx context.Context, a api, family forgeapi.Family, owners []string, spent *spend.Meter, named func(forge.Product)) (*Client, error) {
 	caps, err := a.ConnectionCaps(ctx)
 	if err != nil {
 		return nil, connectionError("connection capabilities", err)
@@ -149,7 +159,7 @@ func newClient(ctx context.Context, a api, family forgeapi.Family, owners []stri
 	if err != nil {
 		return nil, &forge.OpenError{Product: product, Err: connectionError("identify account", err)}
 	}
-	return &Client{api: a, login: account.Login, product: product}, nil
+	return &Client{api: a, login: account.Login, product: product, spent: spent}, nil
 }
 
 // Product is the product the connection answered as.
@@ -159,9 +169,29 @@ func (c *Client) Product() forge.Product { return c.product }
 func (c *Client) Login() string { return c.login }
 
 // Budget is the forge's last reported budget.
-func (c *Client) Budget() forge.Budget { return budgetOf(c.api.BudgetState()) }
+func (c *Client) Budget() forge.Budget {
+	state := c.api.BudgetState()
+	return budgetOf(&state)
+}
 
-func budgetOf(b forgeapi.BudgetState) forge.Budget {
+// ReadCache is what the connection's read cache did since it opened.
+func (c *Client) ReadCache() forge.ReadCache {
+	rc := c.api.BudgetState().ReadCache
+	return forge.ReadCache{Hits: rc.Hits, Misses: rc.Misses, Saved: rc.Saved}
+}
+
+// price charges the points of the documents a read sent since the meter
+// counted before: forgeapi reports only the last document's price
+// (BudgetState.LastCost), so each earlier one is charged one point, the
+// least GitHub charges a query
+// (https://docs.github.com/en/graphql/overview/rate-limits-and-query-limits-for-the-graphql-api#predicting-the-point-value-of-a-query).
+func (c *Client) price(before int) {
+	if n := c.spent.Documents() - before; n > 0 {
+		c.spent.ChargePoints(c.api.BudgetState().LastCost + n - 1)
+	}
+}
+
+func budgetOf(b *forgeapi.BudgetState) forge.Budget {
 	if b.Remaining == forgeapi.BudgetRemainingUnknown {
 		return forge.Budget{Remaining: -1, Reset: b.Reset}
 	}
@@ -181,7 +211,7 @@ func (c *Client) Discover(ctx context.Context, owners []string) (forge.Discovery
 			return c.api.ListRepos(ctx, forgeapi.WithOwner(o), forgeapi.WithAfter(after))
 		})
 		if err != nil {
-			mapped := mapErr(err)
+			mapped := c.readErr(err)
 			if errors.Is(mapped, forge.ErrOwnerUnresolved) {
 				d.Unresolved = append(d.Unresolved, o)
 				continue
@@ -275,7 +305,7 @@ func (c *Client) RunsSince(ctx context.Context, repo forge.Repo, since time.Time
 		if c.product == forge.ProductGitea && undated(err) {
 			return forge.RunList{}, fmt.Errorf("%w: %v", forge.ErrRunsUndated, err)
 		}
-		return forge.RunList{}, mapErr(err)
+		return forge.RunList{}, c.readErr(err)
 	}
 	if err := c.stopOnRateLimit(w); err != nil {
 		return forge.RunList{}, err
@@ -319,9 +349,11 @@ func (c *Client) CommitChecks(ctx context.Context, pr *forge.PullRequest) (forge
 	if err := c.admit(); err != nil {
 		return forge.CheckResult{}, err
 	}
+	before := c.spent.Documents()
 	cc, err := c.api.CommitStatus(ctx, ref, pr.HeadSHA)
+	c.price(before)
 	if err != nil {
-		return forge.CheckResult{}, mapErr(err)
+		return forge.CheckResult{}, c.readErr(err)
 	}
 	if cc.Partial != nil && cc.Partial.Reason == forgeapi.PartialRateLimited {
 		return forge.CheckResult{}, c.rateLimitError()
@@ -372,12 +404,28 @@ func (c *Client) stopOnRateLimit(w walked) error {
 }
 
 // rateLimitError tells a governor deferral from a forge refusal by the budget
-// it left: a deferral holds back budget the forge still reports.
+// it left: a deferral holds back budget the forge still reports. Either
+// carries that budget, the pool forgeapi read.
 func (c *Client) rateLimitError() error {
+	b := c.Budget()
 	if c.api.BudgetState().Remaining > 0 {
-		return forge.ErrReadDeferred
+		return &forge.BudgetStopError{Err: forge.ErrReadDeferred, Budget: b}
 	}
-	return forge.ErrRateLimited
+	return &forge.BudgetStopError{Err: forge.ErrRateLimited, Budget: b}
+}
+
+// readErr maps a failed read (see mapErr). A deferral or a rate limit
+// forgeapi answered carries the budget of the pool it read; one the quota
+// meter held back already carries its own.
+func (c *Client) readErr(err error) error {
+	mapped := mapErr(err)
+	if _, carried := errors.AsType[*forge.BudgetStopError](mapped); carried {
+		return mapped
+	}
+	if errors.Is(mapped, forge.ErrReadDeferred) || errors.Is(mapped, forge.ErrRateLimited) {
+		return &forge.BudgetStopError{Err: mapped, Budget: c.Budget()}
+	}
+	return mapped
 }
 
 // mapErr maps a forgeapi failure on its Kind and Code alone.
@@ -444,7 +492,9 @@ func walk[T any](ctx context.Context, c *Client, maxPages int, fetch func(contex
 		if err := c.admit(); err != nil {
 			return nil, walked{}, err
 		}
+		before := c.spent.Documents()
 		page, err := fetch(ctx, after)
+		c.price(before)
 		if err != nil {
 			return nil, walked{}, err
 		}
@@ -465,7 +515,7 @@ func snapshot[T any](ctx context.Context, c *Client, maxPages int, fetch func(co
 	for attempt := range 2 {
 		rows, w, err := walk(ctx, c, maxPages, fetch)
 		if err != nil {
-			return nil, mapErr(err)
+			return nil, c.readErr(err)
 		}
 		if err := c.stopOnRateLimit(w); err != nil {
 			return nil, err

@@ -14627,6 +14627,631 @@
             }
           }
         }
+      },
+      "panel-85": {
+        "kind": "Panel",
+        "spec": {
+          "id": 85,
+          "title": "Requests per hour",
+          "description": "The requests each connection's finished and stopped scans spent per hour: the requests the forge billed outside GraphQL, the GraphQL documents it answered and the GraphQL points they cost. GitHub counts requests and points against two hourly budgets of 5,000 each, which every other tool acting as the same account shares, and bills nothing for a read the cache answered unchanged. When the range spans weeks, each point is the hourly average of a longer step.",
+          "links": [],
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "loki",
+                      "version": "v0",
+                      "datasource": {
+                        "name": "${datasource}"
+                      },
+                      "spec": {
+                        "expr": "sum by (connection) (sum_over_time({container=\"forge-scout\"} |= `scan ` | json msg=\"msg\", forge=\"forge\", connection=\"connection\", requests_rest=\"requests_rest\" | msg=`scan complete` or msg=`scan stopped` | forge=~\"$forge\" | unwrap requests_rest | __error__=\"\" [$__interval])) * 3600000 / $__interval_ms",
+                        "queryType": "range",
+                        "legendFormat": "{{connection}} requests"
+                      }
+                    },
+                    "refId": "A",
+                    "hidden": false
+                  }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "loki",
+                      "version": "v0",
+                      "datasource": {
+                        "name": "${datasource}"
+                      },
+                      "spec": {
+                        "expr": "sum by (connection) (sum_over_time({container=\"forge-scout\"} |= `scan ` | json msg=\"msg\", forge=\"forge\", connection=\"connection\", requests_graphql=\"requests_graphql\" | msg=`scan complete` or msg=`scan stopped` | forge=~\"$forge\" | unwrap requests_graphql | __error__=\"\" [$__interval])) * 3600000 / $__interval_ms",
+                        "queryType": "range",
+                        "legendFormat": "{{connection}} GraphQL documents"
+                      }
+                    },
+                    "refId": "B",
+                    "hidden": false
+                  }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "loki",
+                      "version": "v0",
+                      "datasource": {
+                        "name": "${datasource}"
+                      },
+                      "spec": {
+                        "expr": "sum by (connection) (sum_over_time({container=\"forge-scout\"} |= `scan ` | json msg=\"msg\", forge=\"forge\", connection=\"connection\", points_graphql=\"points_graphql\" | msg=`scan complete` or msg=`scan stopped` | forge=~\"$forge\" | unwrap points_graphql | __error__=\"\" [$__interval])) * 3600000 / $__interval_ms",
+                        "queryType": "range",
+                        "legendFormat": "{{connection}} GraphQL points"
+                      }
+                    },
+                    "refId": "C",
+                    "hidden": false
+                  }
+                }
+              ],
+              "transformations": [],
+              "queryOptions": {
+                "interval": "1h"
+              }
+            }
+          },
+          "vizConfig": {
+            "kind": "VizConfig",
+            "group": "timeseries",
+            "version": "",
+            "spec": {
+              "options": {
+                "legend": {
+                  "showLegend": true,
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "calcs": []
+                },
+                "tooltip": {
+                  "mode": "multi",
+                  "sort": "desc"
+                }
+              },
+              "fieldConfig": {
+                "defaults": {
+                  "unit": "none",
+                  "min": 0,
+                  "decimals": 0,
+                  "custom": {
+                    "drawStyle": "line",
+                    "lineWidth": 2,
+                    "fillOpacity": 20,
+                    "stacking": {
+                      "mode": "none",
+                      "group": "A"
+                    },
+                    "showPoints": "never",
+                    "spanNulls": false,
+                    "axisSoftMin": 0,
+                    "barAlignment": 0
+                  },
+                  "noValue": "No scan in this range",
+                  "color": {
+                    "mode": "palette-classic"
+                  }
+                },
+                "overrides": []
+              }
+            }
+          }
+        }
+      },
+      "panel-86": {
+        "kind": "Panel",
+        "spec": {
+          "id": 86,
+          "title": "Requests per hour by read",
+          "description": "The requests per hour of each read, its billed requests and its GraphQL documents together, from finished and stopped scans and stacked so the top edge is the total. Open is opening a connection, which a connection kept from the scan before does not repeat. Runs, workflows and code scanning grow with the number of repositories, and PR checks with the number of open pull requests. Split by forge at the top stacks each read once per forge.",
+          "links": [],
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "loki",
+                      "version": "v0",
+                      "datasource": {
+                        "name": "${datasource}"
+                      },
+                      "spec": {
+                        "expr": "sum by (msg$split) (sum_over_time({container=\"forge-scout\"} |= `scan ` | json msg=\"msg\", forge=\"forge\", connection=\"connection\", requests_open=\"requests_open\", requests_open_graphql=\"requests_open_graphql\" | msg=`scan complete` or msg=`scan stopped` | forge=~\"$forge\" | label_format msg=`scan`, requests=`{{ add .requests_open .requests_open_graphql }}` | unwrap requests | __error__=\"\" [$__interval])) * 3600000 / $__interval_ms",
+                        "queryType": "range",
+                        "legendFormat": "Open {{forge}}"
+                      }
+                    },
+                    "refId": "A",
+                    "hidden": false
+                  }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "loki",
+                      "version": "v0",
+                      "datasource": {
+                        "name": "${datasource}"
+                      },
+                      "spec": {
+                        "expr": "sum by (msg$split) (sum_over_time({container=\"forge-scout\"} |= `scan ` | json msg=\"msg\", forge=\"forge\", connection=\"connection\", requests_discovery=\"requests_discovery\", requests_discovery_graphql=\"requests_discovery_graphql\" | msg=`scan complete` or msg=`scan stopped` | forge=~\"$forge\" | label_format msg=`scan`, requests=`{{ add .requests_discovery .requests_discovery_graphql }}` | unwrap requests | __error__=\"\" [$__interval])) * 3600000 / $__interval_ms",
+                        "queryType": "range",
+                        "legendFormat": "Discovery {{forge}}"
+                      }
+                    },
+                    "refId": "B",
+                    "hidden": false
+                  }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "loki",
+                      "version": "v0",
+                      "datasource": {
+                        "name": "${datasource}"
+                      },
+                      "spec": {
+                        "expr": "sum by (msg$split) (sum_over_time({container=\"forge-scout\"} |= `scan ` | json msg=\"msg\", forge=\"forge\", connection=\"connection\", requests_prs=\"requests_prs\", requests_prs_graphql=\"requests_prs_graphql\" | msg=`scan complete` or msg=`scan stopped` | forge=~\"$forge\" | label_format msg=`scan`, requests=`{{ add .requests_prs .requests_prs_graphql }}` | unwrap requests | __error__=\"\" [$__interval])) * 3600000 / $__interval_ms",
+                        "queryType": "range",
+                        "legendFormat": "Pull requests {{forge}}"
+                      }
+                    },
+                    "refId": "C",
+                    "hidden": false
+                  }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "loki",
+                      "version": "v0",
+                      "datasource": {
+                        "name": "${datasource}"
+                      },
+                      "spec": {
+                        "expr": "sum by (msg$split) (sum_over_time({container=\"forge-scout\"} |= `scan ` | json msg=\"msg\", forge=\"forge\", connection=\"connection\", requests_issues=\"requests_issues\", requests_issues_graphql=\"requests_issues_graphql\" | msg=`scan complete` or msg=`scan stopped` | forge=~\"$forge\" | label_format msg=`scan`, requests=`{{ add .requests_issues .requests_issues_graphql }}` | unwrap requests | __error__=\"\" [$__interval])) * 3600000 / $__interval_ms",
+                        "queryType": "range",
+                        "legendFormat": "Issues {{forge}}"
+                      }
+                    },
+                    "refId": "D",
+                    "hidden": false
+                  }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "loki",
+                      "version": "v0",
+                      "datasource": {
+                        "name": "${datasource}"
+                      },
+                      "spec": {
+                        "expr": "sum by (msg$split) (sum_over_time({container=\"forge-scout\"} |= `scan ` | json msg=\"msg\", forge=\"forge\", connection=\"connection\", requests_runs=\"requests_runs\", requests_runs_graphql=\"requests_runs_graphql\" | msg=`scan complete` or msg=`scan stopped` | forge=~\"$forge\" | label_format msg=`scan`, requests=`{{ add .requests_runs .requests_runs_graphql }}` | unwrap requests | __error__=\"\" [$__interval])) * 3600000 / $__interval_ms",
+                        "queryType": "range",
+                        "legendFormat": "Runs {{forge}}"
+                      }
+                    },
+                    "refId": "E",
+                    "hidden": false
+                  }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "loki",
+                      "version": "v0",
+                      "datasource": {
+                        "name": "${datasource}"
+                      },
+                      "spec": {
+                        "expr": "sum by (msg$split) (sum_over_time({container=\"forge-scout\"} |= `scan ` | json msg=\"msg\", forge=\"forge\", connection=\"connection\", requests_checks=\"requests_checks\", requests_checks_graphql=\"requests_checks_graphql\" | msg=`scan complete` or msg=`scan stopped` | forge=~\"$forge\" | label_format msg=`scan`, requests=`{{ add .requests_checks .requests_checks_graphql }}` | unwrap requests | __error__=\"\" [$__interval])) * 3600000 / $__interval_ms",
+                        "queryType": "range",
+                        "legendFormat": "PR checks {{forge}}"
+                      }
+                    },
+                    "refId": "F",
+                    "hidden": false
+                  }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "loki",
+                      "version": "v0",
+                      "datasource": {
+                        "name": "${datasource}"
+                      },
+                      "spec": {
+                        "expr": "sum by (msg$split) (sum_over_time({container=\"forge-scout\"} |= `scan ` | json msg=\"msg\", forge=\"forge\", connection=\"connection\", requests_code_scanning=\"requests_code_scanning\", requests_code_scanning_graphql=\"requests_code_scanning_graphql\" | msg=`scan complete` or msg=`scan stopped` | forge=~\"$forge\" | label_format msg=`scan`, requests=`{{ add .requests_code_scanning .requests_code_scanning_graphql }}` | unwrap requests | __error__=\"\" [$__interval])) * 3600000 / $__interval_ms",
+                        "queryType": "range",
+                        "legendFormat": "Code scanning {{forge}}"
+                      }
+                    },
+                    "refId": "G",
+                    "hidden": false
+                  }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "loki",
+                      "version": "v0",
+                      "datasource": {
+                        "name": "${datasource}"
+                      },
+                      "spec": {
+                        "expr": "sum by (msg$split) (sum_over_time({container=\"forge-scout\"} |= `scan ` | json msg=\"msg\", forge=\"forge\", connection=\"connection\", requests_workflows=\"requests_workflows\", requests_workflows_graphql=\"requests_workflows_graphql\" | msg=`scan complete` or msg=`scan stopped` | forge=~\"$forge\" | label_format msg=`scan`, requests=`{{ add .requests_workflows .requests_workflows_graphql }}` | unwrap requests | __error__=\"\" [$__interval])) * 3600000 / $__interval_ms",
+                        "queryType": "range",
+                        "legendFormat": "Workflows {{forge}}"
+                      }
+                    },
+                    "refId": "H",
+                    "hidden": false
+                  }
+                }
+              ],
+              "transformations": [],
+              "queryOptions": {
+                "interval": "1h"
+              }
+            }
+          },
+          "vizConfig": {
+            "kind": "VizConfig",
+            "group": "timeseries",
+            "version": "",
+            "spec": {
+              "options": {
+                "legend": {
+                  "showLegend": true,
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "calcs": []
+                },
+                "tooltip": {
+                  "mode": "multi",
+                  "sort": "desc"
+                }
+              },
+              "fieldConfig": {
+                "defaults": {
+                  "unit": "none",
+                  "min": 0,
+                  "decimals": 0,
+                  "custom": {
+                    "drawStyle": "line",
+                    "lineWidth": 1,
+                    "fillOpacity": 30,
+                    "stacking": {
+                      "mode": "normal",
+                      "group": "A"
+                    },
+                    "showPoints": "never",
+                    "spanNulls": false,
+                    "axisSoftMin": 0,
+                    "barAlignment": 0
+                  },
+                  "noValue": "No scan in this range",
+                  "color": {
+                    "mode": "palette-classic"
+                  }
+                },
+                "overrides": [
+                  {
+                    "matcher": {
+                      "id": "byRegexp",
+                      "options": "^Open.*"
+                    },
+                    "properties": [
+                      {
+                        "id": "displayName",
+                        "value": "Open ${__field.labels.forge}"
+                      },
+                      {
+                        "id": "color",
+                        "value": {
+                          "mode": "fixed",
+                          "fixedColor": "text"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "matcher": {
+                      "id": "byRegexp",
+                      "options": "^Discovery.*"
+                    },
+                    "properties": [
+                      {
+                        "id": "displayName",
+                        "value": "Discovery ${__field.labels.forge}"
+                      },
+                      {
+                        "id": "color",
+                        "value": {
+                          "mode": "fixed",
+                          "fixedColor": "yellow"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "matcher": {
+                      "id": "byRegexp",
+                      "options": "^Pull\\ requests.*"
+                    },
+                    "properties": [
+                      {
+                        "id": "displayName",
+                        "value": "Pull requests ${__field.labels.forge}"
+                      },
+                      {
+                        "id": "color",
+                        "value": {
+                          "mode": "fixed",
+                          "fixedColor": "green"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "matcher": {
+                      "id": "byRegexp",
+                      "options": "^Issues.*"
+                    },
+                    "properties": [
+                      {
+                        "id": "displayName",
+                        "value": "Issues ${__field.labels.forge}"
+                      },
+                      {
+                        "id": "color",
+                        "value": {
+                          "mode": "fixed",
+                          "fixedColor": "blue"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "matcher": {
+                      "id": "byRegexp",
+                      "options": "^Runs.*"
+                    },
+                    "properties": [
+                      {
+                        "id": "displayName",
+                        "value": "Runs ${__field.labels.forge}"
+                      },
+                      {
+                        "id": "color",
+                        "value": {
+                          "mode": "fixed",
+                          "fixedColor": "orange"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "matcher": {
+                      "id": "byRegexp",
+                      "options": "^PR\\ checks.*"
+                    },
+                    "properties": [
+                      {
+                        "id": "displayName",
+                        "value": "PR checks ${__field.labels.forge}"
+                      },
+                      {
+                        "id": "color",
+                        "value": {
+                          "mode": "fixed",
+                          "fixedColor": "purple"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "matcher": {
+                      "id": "byRegexp",
+                      "options": "^Code\\ scanning.*"
+                    },
+                    "properties": [
+                      {
+                        "id": "displayName",
+                        "value": "Code scanning ${__field.labels.forge}"
+                      },
+                      {
+                        "id": "color",
+                        "value": {
+                          "mode": "fixed",
+                          "fixedColor": "red"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "matcher": {
+                      "id": "byRegexp",
+                      "options": "^Workflows.*"
+                    },
+                    "properties": [
+                      {
+                        "id": "displayName",
+                        "value": "Workflows ${__field.labels.forge}"
+                      },
+                      {
+                        "id": "color",
+                        "value": {
+                          "mode": "fixed",
+                          "fixedColor": "light-blue"
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        }
+      },
+      "panel-87": {
+        "kind": "Panel",
+        "spec": {
+          "id": 87,
+          "title": "Read cache answers per hour",
+          "description": "Per hour, each connection's reads the cache answered unchanged, the reads it could hold that the forge answered in full, and the requests the unchanged answers saved. GitHub bills nothing for an unchanged answer, while GitLab bills it like any other, so there only the transfer is saved. Gitea and Forgejo send nothing the cache can check, so their reads are all answered in full, and GraphQL reads and GitHub's code-scanning and workflow reads are never cached. A restart empties the cache, so the first scan after one saves nothing.",
+          "links": [],
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "loki",
+                      "version": "v0",
+                      "datasource": {
+                        "name": "${datasource}"
+                      },
+                      "spec": {
+                        "expr": "sum by (connection) (sum_over_time({container=\"forge-scout\"} |= `scan ` | json msg=\"msg\", forge=\"forge\", connection=\"connection\", cache_hits=\"cache_hits\" | msg=`scan complete` or msg=`scan stopped` | forge=~\"$forge\" | unwrap cache_hits | __error__=\"\" [$__interval])) * 3600000 / $__interval_ms",
+                        "queryType": "range",
+                        "legendFormat": "{{connection}} unchanged"
+                      }
+                    },
+                    "refId": "A",
+                    "hidden": false
+                  }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "loki",
+                      "version": "v0",
+                      "datasource": {
+                        "name": "${datasource}"
+                      },
+                      "spec": {
+                        "expr": "sum by (connection) (sum_over_time({container=\"forge-scout\"} |= `scan ` | json msg=\"msg\", forge=\"forge\", connection=\"connection\", cache_misses=\"cache_misses\" | msg=`scan complete` or msg=`scan stopped` | forge=~\"$forge\" | unwrap cache_misses | __error__=\"\" [$__interval])) * 3600000 / $__interval_ms",
+                        "queryType": "range",
+                        "legendFormat": "{{connection}} in full"
+                      }
+                    },
+                    "refId": "B",
+                    "hidden": false
+                  }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "loki",
+                      "version": "v0",
+                      "datasource": {
+                        "name": "${datasource}"
+                      },
+                      "spec": {
+                        "expr": "sum by (connection) (sum_over_time({container=\"forge-scout\"} |= `scan ` | json msg=\"msg\", forge=\"forge\", connection=\"connection\", cache_saved=\"cache_saved\" | msg=`scan complete` or msg=`scan stopped` | forge=~\"$forge\" | unwrap cache_saved | __error__=\"\" [$__interval])) * 3600000 / $__interval_ms",
+                        "queryType": "range",
+                        "legendFormat": "{{connection}} saved"
+                      }
+                    },
+                    "refId": "C",
+                    "hidden": false
+                  }
+                }
+              ],
+              "transformations": [],
+              "queryOptions": {
+                "interval": "1h"
+              }
+            }
+          },
+          "vizConfig": {
+            "kind": "VizConfig",
+            "group": "timeseries",
+            "version": "",
+            "spec": {
+              "options": {
+                "legend": {
+                  "showLegend": true,
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "calcs": []
+                },
+                "tooltip": {
+                  "mode": "multi",
+                  "sort": "desc"
+                }
+              },
+              "fieldConfig": {
+                "defaults": {
+                  "unit": "none",
+                  "min": 0,
+                  "decimals": 0,
+                  "custom": {
+                    "drawStyle": "line",
+                    "lineWidth": 2,
+                    "fillOpacity": 20,
+                    "stacking": {
+                      "mode": "none",
+                      "group": "A"
+                    },
+                    "showPoints": "never",
+                    "spanNulls": false,
+                    "axisSoftMin": 0,
+                    "barAlignment": 0
+                  },
+                  "noValue": "No scan in this range",
+                  "color": {
+                    "mode": "palette-classic"
+                  }
+                },
+                "overrides": []
+              }
+            }
+          }
+        }
       }
     },
     "layout": {
@@ -15831,6 +16456,59 @@
                                   "element": {
                                     "kind": "ElementReference",
                                     "name": "panel-78"
+                                  }
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "kind": "RowsLayoutRow",
+                      "spec": {
+                        "title": "API requests",
+                        "collapse": false,
+                        "layout": {
+                          "kind": "GridLayout",
+                          "spec": {
+                            "items": [
+                              {
+                                "kind": "GridLayoutItem",
+                                "spec": {
+                                  "x": 0,
+                                  "y": 0,
+                                  "width": 12,
+                                  "height": 11,
+                                  "element": {
+                                    "kind": "ElementReference",
+                                    "name": "panel-85"
+                                  }
+                                }
+                              },
+                              {
+                                "kind": "GridLayoutItem",
+                                "spec": {
+                                  "x": 12,
+                                  "y": 0,
+                                  "width": 12,
+                                  "height": 11,
+                                  "element": {
+                                    "kind": "ElementReference",
+                                    "name": "panel-86"
+                                  }
+                                }
+                              },
+                              {
+                                "kind": "GridLayoutItem",
+                                "spec": {
+                                  "x": 0,
+                                  "y": 11,
+                                  "width": 24,
+                                  "height": 11,
+                                  "element": {
+                                    "kind": "ElementReference",
+                                    "name": "panel-87"
                                   }
                                 }
                               }

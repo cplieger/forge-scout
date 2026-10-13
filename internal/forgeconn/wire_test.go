@@ -17,6 +17,7 @@ import (
 	"github.com/cplieger/github-scout/internal/forge"
 	"github.com/cplieger/github-scout/internal/forgeconn/forgeconntest"
 	"github.com/cplieger/github-scout/internal/ghquota"
+	"github.com/cplieger/github-scout/internal/spend"
 )
 
 var wireNow = time.Now().UTC().Truncate(time.Second)
@@ -62,7 +63,7 @@ func openFake(t *testing.T, product forgeconntest.Product, w forgeconntest.World
 	srv := forgeconntest.New(product, w)
 	t.Cleanup(srv.Close)
 	conn := srv.Connection("test")
-	c, err := Open(t.Context(), &conn, slog.New(slog.NewTextHandler(io.Discard, nil)), ghquota.New(nil))
+	c, err := Open(t.Context(), &conn, slog.New(slog.NewTextHandler(io.Discard, nil)), ghquota.New(nil), new(spend.Meter))
 	if err != nil {
 		t.Fatalf("Open(%s fake) = %v; requests %v", product, err, srv.Requests())
 	}
@@ -369,7 +370,7 @@ func TestWire_governor_defers_below_the_read_reserve(t *testing.T) {
 	srv := forgeconntest.New(forgeconntest.GitHub, w)
 	t.Cleanup(srv.Close)
 	conn := srv.Connection("test")
-	_, err := Open(t.Context(), &conn, slog.New(slog.NewTextHandler(io.Discard, nil)), ghquota.New(nil))
+	_, err := Open(t.Context(), &conn, slog.New(slog.NewTextHandler(io.Discard, nil)), ghquota.New(nil), new(spend.Meter))
 	if !errors.Is(err, forge.ErrReadDeferred) || errors.Is(err, forge.ErrConnection) {
 		t.Errorf("Open with %d left under a %d reserve = %v, want forge.ErrReadDeferred and not a connection failure", w.Remaining, forge.ReadReserve, err)
 	}
@@ -441,7 +442,7 @@ func TestOpen_arms_the_quota_meter_on_github_before_its_account_read(t *testing.
 	t.Cleanup(srv.Close)
 	conn := srv.Connection("test")
 	m := ghquota.New(nil)
-	c, err := Open(t.Context(), &conn, slog.New(slog.NewTextHandler(io.Discard, nil)), m)
+	c, err := Open(t.Context(), &conn, slog.New(slog.NewTextHandler(io.Discard, nil)), m, new(spend.Meter))
 	if err != nil {
 		t.Fatalf("Open(github fake) = %v", err)
 	}
@@ -454,7 +455,7 @@ func TestOpen_arms_the_quota_meter_on_github_before_its_account_read(t *testing.
 		t.Cleanup(srv.Close)
 		conn := srv.Connection("test")
 		m := ghquota.New(nil)
-		c, err := Open(t.Context(), &conn, slog.New(slog.NewTextHandler(io.Discard, nil)), m)
+		c, err := Open(t.Context(), &conn, slog.New(slog.NewTextHandler(io.Discard, nil)), m, new(spend.Meter))
 		if err != nil {
 			t.Fatalf("Open(%s fake) = %v", product, err)
 		}
@@ -503,7 +504,7 @@ func TestOpen_a_retried_read_charges_every_attempt_and_the_next_read_waits(t *te
 	conn := srv.Connection("test")
 	conn.URL = front.URL
 	m := ghquota.New(nil)
-	c, err := Open(t.Context(), &conn, slog.New(slog.NewTextHandler(io.Discard, nil)), m)
+	c, err := Open(t.Context(), &conn, slog.New(slog.NewTextHandler(io.Discard, nil)), m, new(spend.Meter))
 	if err != nil {
 		t.Fatalf("Setup: Open(github behind a proxy) = %v", err)
 	}

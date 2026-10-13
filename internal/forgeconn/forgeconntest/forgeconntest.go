@@ -9,8 +9,11 @@
 package forgeconntest
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"sort"
@@ -49,6 +52,11 @@ type World struct {
 	// RejectToken answers the account route 401, as for a revoked token,
 	// while the detection routes still answer.
 	RejectToken bool
+	// Validators gives every GET answered 200 on GitHub and GitLab an ETag of
+	// its body, and answers a request whose If-None-Match names it 304 with
+	// the 200's headers and no body, as both products do; Gitea and Forgejo
+	// send no validator.
+	Validators bool
 }
 
 // Repo is one repository under the World's owner.
@@ -117,6 +125,10 @@ type Server struct {
 	unhandled []string
 	world     World
 	mu        sync.Mutex
+	// notModified counts the 304 answers served.
+	notModified int
+	// cost is the points each GitHub document reports it cost.
+	cost int
 }
 
 // New starts a fake instance of product serving w. The caller closes it.
@@ -124,7 +136,7 @@ func New(product Product, w World) *Server {
 	if w.Remaining == 0 {
 		w.Remaining = 4900
 	}
-	s := &Server{product: product, world: w}
+	s := &Server{product: product, world: w, cost: 1}
 	s.Server = httptest.NewServer(http.HandlerFunc(s.serve))
 	return s
 }
@@ -137,6 +149,14 @@ func (s *Server) Connection(name string) config.Connection {
 		PrivateAddresses: true, AllowPlaintext: true,
 		Security: config.Security{Enabled: true, SkipForks: true, SkipRepos: map[string]bool{}},
 	}
+}
+
+// SetGraphQLCost changes the points each later GitHub document reports it
+// cost.
+func (s *Server) SetGraphQLCost(points int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.cost = points
 }
 
 // SetBudget changes the budget later responses report.
@@ -164,6 +184,13 @@ func (s *Server) Requests() []string {
 	return append([]string(nil), s.requests...)
 }
 
+// NotModified is how many requests the fake answered 304.
+func (s *Server) NotModified() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.notModified
+}
+
 // Unhandled lists the requests the fake did not serve.
 func (s *Server) Unhandled() []string {
 	s.mu.Lock()
@@ -181,6 +208,41 @@ func (s *Server) record(line string, handled bool) {
 }
 
 func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
+	if s.world.Validators && r.Method == http.MethodGet && (s.product == GitHub || s.product == GitLab) {
+		rec := httptest.NewRecorder()
+		s.answer(rec, r)
+		s.revalidate(w, r, rec)
+		return
+	}
+	s.answer(w, r)
+}
+
+// revalidate writes rec's answer to w, as a 304 when it is a 200 whose ETag
+// the request's If-None-Match names.
+func (s *Server) revalidate(w http.ResponseWriter, r *http.Request, rec *httptest.ResponseRecorder) {
+	h := w.Header()
+	maps.Copy(h, rec.Header())
+	if rec.Code != http.StatusOK {
+		w.WriteHeader(rec.Code)
+		_, _ = w.Write(rec.Body.Bytes())
+		return
+	}
+	sum := sha256.Sum256(rec.Body.Bytes())
+	tag := `W/"` + hex.EncodeToString(sum[:8]) + `"`
+	h.Set("ETag", tag)
+	if r.Header.Get("If-None-Match") == tag {
+		s.mu.Lock()
+		s.notModified++
+		s.mu.Unlock()
+		h.Del("Content-Length")
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(rec.Body.Bytes())
+}
+
+func (s *Server) answer(w http.ResponseWriter, r *http.Request) {
 	line := r.Method + " " + r.URL.EscapedPath()
 	if r.URL.RawQuery != "" {
 		line += "?" + r.URL.RawQuery

@@ -11,6 +11,7 @@ import (
 	"github.com/cplieger/forgeapi"
 	"github.com/cplieger/github-scout/internal/forge"
 	"github.com/cplieger/github-scout/internal/ghquota"
+	"github.com/cplieger/github-scout/internal/spend"
 )
 
 // fakeAPI answers the reads the adapter makes from function fields; an
@@ -82,7 +83,7 @@ func client(t *testing.T, f *fakeAPI) *Client {
 		forgeapi.ProductGitHub: forgeapi.FamilyGitHub, forgeapi.ProductGitLab: forgeapi.FamilyGitLab,
 		forgeapi.ProductGitea: forgeapi.FamilyGitea, forgeapi.ProductForgejo: forgeapi.FamilyGitea,
 	}[f.product]
-	c, err := newClient(t.Context(), f, family, []string{"o"}, func(forge.Product) {})
+	c, err := newClient(t.Context(), f, family, []string{"o"}, new(spend.Meter), func(forge.Product) {})
 	if err != nil {
 		t.Fatalf("Setup: newClient = %v", err)
 	}
@@ -113,13 +114,13 @@ func TestNewClient_names_the_product_and_account(t *testing.T) {
 }
 
 func TestNewClient_refuses_an_unknown_product_and_a_foreign_owner_form(t *testing.T) {
-	if _, err := newClient(t.Context(), &fakeAPI{product: forgeapi.ProductUnknown}, forgeapi.FamilyGitHub, []string{"o"}, func(forge.Product) {}); !errors.Is(err, forge.ErrConnection) {
+	if _, err := newClient(t.Context(), &fakeAPI{product: forgeapi.ProductUnknown}, forgeapi.FamilyGitHub, []string{"o"}, new(spend.Meter), func(forge.Product) {}); !errors.Is(err, forge.ErrConnection) {
 		t.Errorf("newClient(unknown product) = %v, want forge.ErrConnection", err)
 	}
-	if _, err := newClient(t.Context(), &fakeAPI{product: forgeapi.ProductGitHub}, forgeapi.FamilyGitHub, []string{"group/sub"}, func(forge.Product) {}); !errors.Is(err, forge.ErrConnection) {
+	if _, err := newClient(t.Context(), &fakeAPI{product: forgeapi.ProductGitHub}, forgeapi.FamilyGitHub, []string{"group/sub"}, new(spend.Meter), func(forge.Product) {}); !errors.Is(err, forge.ErrConnection) {
 		t.Errorf("newClient(GitHub, owner group/sub) = %v, want forge.ErrConnection: a path owner is GitLab's alone", err)
 	}
-	if _, err := newClient(t.Context(), &fakeAPI{product: forgeapi.ProductGitLab}, forgeapi.FamilyGitLab, []string{"group/sub"}, func(forge.Product) {}); err != nil {
+	if _, err := newClient(t.Context(), &fakeAPI{product: forgeapi.ProductGitLab}, forgeapi.FamilyGitLab, []string{"group/sub"}, new(spend.Meter), func(forge.Product) {}); err != nil {
 		t.Errorf("newClient(GitLab, owner group/sub) = %v, want nil", err)
 	}
 }
@@ -137,14 +138,14 @@ func TestNewClient_a_failure_after_detection_names_the_product(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := newClient(t.Context(), tc.f, forgeapi.FamilyGitea, tc.owners, func(forge.Product) {})
+			_, err := newClient(t.Context(), tc.f, forgeapi.FamilyGitea, tc.owners, new(spend.Meter), func(forge.Product) {})
 			oe, ok := errors.AsType[*forge.OpenError](err)
 			if !ok || oe.Product != productOf(tc.f.product) || !errors.Is(err, tc.want) {
 				t.Errorf("newClient(%s) = %v, want a *forge.OpenError naming %v and wrapping %v", tc.name, err, tc.f.product, tc.want)
 			}
 		})
 	}
-	_, err := newClient(t.Context(), &fakeAPI{product: forgeapi.ProductUnknown}, forgeapi.FamilyGitHub, []string{"o"}, func(forge.Product) {})
+	_, err := newClient(t.Context(), &fakeAPI{product: forgeapi.ProductUnknown}, forgeapi.FamilyGitHub, []string{"o"}, new(spend.Meter), func(forge.Product) {})
 	if _, ok := errors.AsType[*forge.OpenError](err); ok {
 		t.Errorf("newClient(unknown product) = %v, want no product named", err)
 	}

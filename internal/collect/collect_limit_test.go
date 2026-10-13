@@ -18,6 +18,7 @@ import (
 	"github.com/cplieger/github-scout/internal/config"
 	"github.com/cplieger/github-scout/internal/forge"
 	"github.com/cplieger/github-scout/internal/runstate"
+	"github.com/cplieger/github-scout/internal/spend"
 	"github.com/cplieger/slogx/capture"
 )
 
@@ -525,7 +526,7 @@ func TestScan_every_budget_stop_stays_visible_at_the_default_log_level(t *testin
 func TestScan_a_panic_in_a_connection_ends_the_process(t *testing.T) {
 	if dir := os.Getenv("FORGE_SCOUT_PANIC_STATE"); dir != "" {
 		c := New(t.Context(), &Deps{
-			Open: func(context.Context, *config.Connection) (Conn, GitHubReader, error) {
+			Open: func(context.Context, *config.Connection, *spend.Meter) (Conn, GitHubReader, error) {
 				panic("simulated scan panic")
 			},
 			Store:       openStore(t, dir),

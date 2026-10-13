@@ -383,7 +383,7 @@ func (c *Collector) emitStopped(sc *scan, r *connResult, escalated bool) {
 	if budgetStop && ok && !r.budget.Reset.IsZero() && last.Equal(r.budget.Reset) {
 		level = slog.LevelInfo
 	}
-	attrs := make([]slog.Attr, 0, 10+numFamilies)
+	attrs := make([]slog.Attr, 0, 17+int(numFamilies)+2*len(requestFamilies))
 	attrs = append(attrs, slog.Int64("scan_id", sc.id), slog.String("reason", stop.reason), slog.String("phase", stop.phase))
 	if stop.reason == stopScanTimeout {
 		attrs = append(attrs, slog.String("limit", c.limit.String()), slog.String("hint", timeoutHint))
@@ -391,6 +391,7 @@ func (c *Collector) emitStopped(sc *scan, r *connResult, escalated bool) {
 	attrs = append(attrs, r.ledger.readAttrs()...)
 	attrs = append(attrs, slog.Bool("degraded", escalated || r.ledger.degraded()), slog.String("failed_signals", r.ledger.failedSignals()))
 	attrs = append(attrs, budgetAttrs(r.budget)...)
+	attrs = append(attrs, requestAttrs(r)...)
 	attrs = append(attrs, c.intervalAttr())
 	if sc.out.log(r.log, level, "scan stopped", attrs...) && budgetStop {
 		c.lastStops[r.cfg.Name] = r.budget.Reset

@@ -35,6 +35,7 @@ func completeAttrs(sc *scan, r *connResult, b *burst) []slog.Attr {
 	attrs = append(attrs,
 		slog.Int("errors", l.errCount()), slog.Bool("degraded", l.degraded()), slog.String("failed_signals", l.failedSignals()))
 	attrs = append(attrs, budgetAttrs(r.budget)...)
+	attrs = append(attrs, requestAttrs(r)...)
 	return append(attrs, slog.Int64("duration_ms", r.sum.duration.Milliseconds()))
 }
 
