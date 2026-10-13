@@ -24,7 +24,7 @@ var hiddenUnless = []string{
 	"Overview / Critical and high alerts / stat", "Overview / PRs with failing checks / stat", "Overview / PRs from other people / stat",
 	"Overview / Issues from other people / stat", "Overview / PRs untouched for 30+ days / stat", "Overview / Issues untouched for 30+ days / stat",
 	"Overview / PR checks this token cannot read / stat", "Overview / Counts as of / stat", "Overview / All clear / stat",
-	"Overview / Failing on the default branch / table", "Overview / Pull requests to answer / table", "Overview / Critical and high alerts to fix / table",
+	"Overview / Failing on the default branch / table", "Overview / Pull requests needing attention / table", "Overview / Critical and high alerts to fix / table",
 	"CI runs / Failed runs, newest first / table", "CI runs / Workflows GitHub disabled / table", "CI runs / Runs that passed after a re-run / table",
 	"CI runs / Slowest workflows by p95 run time / table",
 	"Open work / Open pull requests / stat", "Open work / Open issues / stat", "Open work / PRs untouched for 30+ days / stat",
@@ -36,6 +36,10 @@ var hiddenUnless = []string{
 	"Code scanning / Warning, no security severity / stat", "Code scanning / Note, no security severity / stat", "Code scanning / Counts as of / stat",
 	"Code scanning / Open code scanning alerts / table", "Code scanning / Open alerts by tool / table", "Code scanning / Code scanning coverage / table",
 }
+
+// attentionPRs is the Overview's table of the open pull requests that need
+// the reader.
+const attentionPRs = "Pull requests needing attention"
 
 // hiddenPoints is the maxDataPoints every hidden-unless panel pins.
 const hiddenPoints = 500
@@ -596,7 +600,7 @@ func TestDashboard_overview_tables_list_only_what_its_tiles_count(t *testing.T) 
 	}{
 		// 1 is untouched for over 30 days, 2 from someone else with failing
 		// checks; 3 is a bot's and 4 is yours and new.
-		"Pull requests to answer":         {label: "number", want: []string{"1", "2"}},
+		attentionPRs:                      {label: "number", want: []string{"1", "2"}},
 		"Critical and high alerts to fix": {label: "severity", want: []string{"critical", "high"}},
 	} {
 		t.Run(strings.ReplaceAll(title, " ", "_"), func(t *testing.T) {
@@ -651,8 +655,8 @@ func TestDashboard_scout_health_shows_the_items_exclude_rules_leave_out(t *testi
 	}
 }
 
-func TestDashboard_pull_requests_to_answer_lists_one_behind_any_number_of_idler_ones(t *testing.T) {
-	p := panelTitled(t, dashboardPanels(loadDashboard(t)), "Pull requests to answer")
+func TestDashboard_pull_requests_needing_attention_lists_one_behind_any_number_of_idler_ones(t *testing.T) {
+	p := panelTitled(t, dashboardPanels(loadDashboard(t)), attentionPRs)
 	const scanID = 1000
 	conn := map[string]string{"forge": "github", "connection": "gh", "scan_id": strconv.Itoa(scanID)}
 	complete := map[string]string{"msg": "scan complete"}
@@ -683,6 +687,79 @@ func TestDashboard_pull_requests_to_answer_lists_one_behind_any_number_of_idler_
 	if !slices.Equal(shown, []string{"26"}) {
 		t.Errorf("panel %q lists numbers %v, want [26], the one pull request from someone else", p.title, shown)
 	}
+}
+
+func TestDashboard_pull_requests_needing_attention_say_why(t *testing.T) {
+	p := panelTitled(t, dashboardPanels(loadDashboard(t)), attentionPRs)
+	const scanID = 1000
+	conn := map[string]string{"forge": "github", "connection": "gh", "scan_id": strconv.Itoa(scanID)}
+	complete := map[string]string{"msg": "scan complete"}
+	maps.Copy(complete, conn)
+	lines := []lokiLine{newLokiLine(t, scanID, complete)}
+	// Each pull request's from, checks and idle days, and the Why it reads;
+	// "" is one the table leaves out.
+	cases := []struct{ from, checks, idle, want string }{
+		{"you", "failing", "0", "Failing checks"},
+		{"you", "passing", "30", "Idle 30+ days"},
+		{"someone_else", "passing", "29", "From someone else"},
+		{"bot", "failing", "45", "Failing checks, Idle 30+ days"},
+		{"someone_else", "failing", "2", "Failing checks, From someone else"},
+		{"someone_else", "none", "31", "Idle 30+ days, From someone else"},
+		{"someone_else", "failing", "90", "Failing checks, Idle 30+ days, From someone else"},
+		{"you", "passing", "29", ""},
+		{"bot", "unknown", "0", ""},
+	}
+	want := map[string]string{}
+	for i, c := range cases {
+		n := strconv.Itoa(i + 1)
+		l := map[string]string{
+			"msg": "open pull request", "rank": n, "forge_rank": n, "repo": "o/r", "number": n, "ref": "#" + n, "title": "t" + n,
+			"from": c.from, "checks": c.checks, "draft": "false", "url": "https://gh.test/o/r/pull/" + n, "updated_at": "2026-01-01T00:00:00Z", "idle_days": c.idle,
+		}
+		maps.Copy(l, conn)
+		lines = append(lines, newLokiLine(t, scanID+int64(i+1), l))
+		if c.want != "" {
+			want[n] = c.want
+		}
+	}
+	got, err := (&lokiModel{lines: lines, at: 5000, maxSeries: lokiMaxSeries}).eval(p.queries[0].expr)
+	if err != nil {
+		t.Fatalf("panel %q: %v", p.title, err)
+	}
+	shown := map[string]string{}
+	for _, s := range got {
+		shown[s.labels["number"]] = s.labels["why"]
+	}
+	if !maps.Equal(shown, want) {
+		t.Errorf("panel %q reads Why by number %v, want %v", p.title, shown, want)
+	}
+	kept := false
+	for _, tr := range p.transforms {
+		if tr["group"] == "filterFieldsByName" {
+			kept = slices.Contains(anyStrings(field(tr, "include", "names")), "why")
+		}
+	}
+	if !kept || columnName(&p, "why") != "Why" {
+		t.Errorf("panel %q keeps why %v under the header %q, want a column headed Why", p.title, kept, columnName(&p, "why"))
+	}
+}
+
+// columnName is the header p's overrides give field name, or "".
+func columnName(p *dashPanel, name string) string {
+	overrides, _ := field(p.el, "spec", "vizConfig", "spec", "fieldConfig", "overrides").([]any)
+	for _, o := range overrides {
+		if field(o, "matcher", "id") != "byName" || field(o, "matcher", "options") != name {
+			continue
+		}
+		props, _ := field(o, "properties").([]any)
+		for _, pr := range props {
+			if field(pr, "id") == "displayName" {
+				s, _ := field(pr, "value").(string)
+				return s
+			}
+		}
+	}
+	return ""
 }
 
 // codeScanningRe matches a query that reads only code scanning: its lines,

@@ -1337,8 +1337,8 @@
         "kind": "Panel",
         "spec": {
           "id": 22,
-          "title": "Pull requests to answer",
-          "description": "Open pull requests opened by another person, not a bot, or with failing checks or untouched for 30 days or more, idlest first. It lists every such pull request in each connection's newest complete scan, and the Open work tab lists the open pull requests. From says who opened it, and Checks, absent on Gitea and Forgejo, is its head commit's verdict, or Not available with this token where GitHub refuses the token its checks. As of is when the scan that read the row started, older for a connection whose scans stopped since, and the table hides while it has no row.",
+          "title": "Pull requests needing attention",
+          "description": "Open pull requests with failing checks, untouched for 30 days or more, or opened by another person, not a bot, idlest first, and Why names each of those reasons that applies. It lists every such pull request in each connection's newest complete scan, and the Open work tab lists the open pull requests. From says who opened it, and Checks, absent on Gitea and Forgejo, is its head commit's verdict, or Not available with this token where GitHub refuses the token its checks. As of is when the scan that read the row started, older for a connection whose scans stopped since, and the table hides while it has no row.",
           "links": [],
           "data": {
             "kind": "QueryGroup",
@@ -1355,7 +1355,7 @@
                         "name": "${datasource}"
                       },
                       "spec": {
-                        "expr": "topk by (connection, forge, repo, number) (1, last_over_time({container=\"forge-scout\"} |= `open pull request` | json msg=\"msg\", forge=\"forge\", scan_id=\"scan_id\", connection=\"connection\", repo=\"repo\", ref=\"ref\", title=\"title\", from=\"from\", checks=\"checks\", draft=\"draft\", url=\"url\", updated_at=\"updated_at\", number=\"number\", idle_days=\"idle_days\" | msg=`open pull request` | forge=~\"$forge\" | label_format attention=`{{ if or (eq .from \"someone_else\") (eq .checks \"failing\") (ge (int .idle_days) 30) }}yes{{ end }}` | attention=`yes` | label_format repo=`{{ if eq .connection \"$connections\" }}{{ .repo }}{{ else }}{{ .repo }} on {{ .connection }}{{ end }}` | label_format link=`{{ if eq .forge \"github\" }}Open on GitHub{{ else if eq .forge \"gitlab\" }}Open on GitLab{{ else if eq .forge \"gitea\" }}Open on Gitea{{ else }}Open on Forgejo{{ end }}` | label_format item=`{{ .ref }} {{ .title }}` | unwrap scan_id | __error__=\"\" [7d]) by (connection, forge, repo, number, ref, title, from, draft, checks, url, updated_at, link, item)) == on (connection) group_left () last_over_time({container=\"forge-scout\"} |= `scan complete` | json msg=\"msg\", forge=\"forge\", connection=\"connection\", scan_id=\"scan_id\" | msg=`scan complete` | forge=~\"$forge\" | unwrap scan_id | __error__=\"\" [7d]) by (connection)",
+                        "expr": "topk by (connection, forge, repo, number) (1, last_over_time({container=\"forge-scout\"} |= `open pull request` | json msg=\"msg\", forge=\"forge\", scan_id=\"scan_id\", connection=\"connection\", repo=\"repo\", ref=\"ref\", title=\"title\", from=\"from\", checks=\"checks\", draft=\"draft\", url=\"url\", updated_at=\"updated_at\", number=\"number\", idle_days=\"idle_days\" | msg=`open pull request` | forge=~\"$forge\" | label_format why=`{{ if eq .checks \"failing\" }}Failing checks{{ end }}{{ if ge (int .idle_days) 30 }}{{ if eq .checks \"failing\" }}, {{ end }}Idle 30+ days{{ end }}{{ if eq .from \"someone_else\" }}{{ if or (eq .checks \"failing\") (ge (int .idle_days) 30) }}, {{ end }}From someone else{{ end }}` | why!=\"\" | label_format repo=`{{ if eq .connection \"$connections\" }}{{ .repo }}{{ else }}{{ .repo }} on {{ .connection }}{{ end }}` | label_format link=`{{ if eq .forge \"github\" }}Open on GitHub{{ else if eq .forge \"gitlab\" }}Open on GitLab{{ else if eq .forge \"gitea\" }}Open on Gitea{{ else }}Open on Forgejo{{ end }}` | label_format item=`{{ .ref }} {{ .title }}` | unwrap scan_id | __error__=\"\" [7d]) by (connection, forge, repo, number, ref, title, from, draft, checks, why, url, updated_at, link, item)) == on (connection) group_left () last_over_time({container=\"forge-scout\"} |= `scan complete` | json msg=\"msg\", forge=\"forge\", connection=\"connection\", scan_id=\"scan_id\" | msg=`scan complete` | forge=~\"$forge\" | unwrap scan_id | __error__=\"\" [7d]) by (connection)",
                         "queryType": "instant",
                         "format": "table"
                       }
@@ -1384,6 +1384,7 @@
                           "url",
                           "repo",
                           "item",
+                          "why",
                           "from",
                           "checks",
                           "updated_at",
@@ -1401,11 +1402,12 @@
                       "indexByName": {
                         "repo": 0,
                         "item": 1,
-                        "from": 2,
-                        "checks": 3,
-                        "updated_at": 4,
-                        "Value #A": 5,
-                        "link": 6,
+                        "why": 2,
+                        "from": 3,
+                        "checks": 4,
+                        "updated_at": 5,
+                        "Value #A": 6,
+                        "link": 7,
                         "url": 9
                       }
                     }
@@ -1516,6 +1518,26 @@
                             "url": "${__data.fields.url}"
                           }
                         ]
+                      }
+                    ]
+                  },
+                  {
+                    "matcher": {
+                      "id": "byName",
+                      "options": "why"
+                    },
+                    "properties": [
+                      {
+                        "id": "displayName",
+                        "value": "Why"
+                      },
+                      {
+                        "id": "custom.minWidth",
+                        "value": 160
+                      },
+                      {
+                        "id": "custom.wrapText",
+                        "value": true
                       }
                     ]
                   },
@@ -13680,7 +13702,7 @@
                     {
                       "kind": "RowsLayoutRow",
                       "spec": {
-                        "title": "Pull requests to answer",
+                        "title": "Pull requests needing attention",
                         "collapse": false,
                         "hideHeader": true,
                         "layout": {
@@ -13951,7 +13973,7 @@
                                   "x": 0,
                                   "y": 0,
                                   "width": 12,
-                                  "height": 16,
+                                  "height": 7,
                                   "element": {
                                     "kind": "ElementReference",
                                     "name": "panel-32"
@@ -13964,32 +13986,18 @@
                                   "x": 12,
                                   "y": 0,
                                   "width": 12,
-                                  "height": 16,
+                                  "height": 7,
                                   "element": {
                                     "kind": "ElementReference",
                                     "name": "panel-33"
                                   }
                                 }
-                              }
-                            ]
-                          }
-                        }
-                      }
-                    },
-                    {
-                      "kind": "RowsLayoutRow",
-                      "spec": {
-                        "title": "Run time",
-                        "collapse": false,
-                        "layout": {
-                          "kind": "GridLayout",
-                          "spec": {
-                            "items": [
+                              },
                               {
                                 "kind": "GridLayoutItem",
                                 "spec": {
                                   "x": 0,
-                                  "y": 0,
+                                  "y": 7,
                                   "width": 24,
                                   "height": 11,
                                   "element": {
@@ -14354,6 +14362,7 @@
                       "spec": {
                         "title": "Pull requests",
                         "collapse": false,
+                        "hideHeader": true,
                         "layout": {
                           "kind": "GridLayout",
                           "spec": {
@@ -14389,7 +14398,7 @@
                             "columnWidthMode": "custom",
                             "columnWidth": 300,
                             "rowHeightMode": "custom",
-                            "rowHeight": 430,
+                            "rowHeight": 354,
                             "fillScreen": false,
                             "items": [
                               {
@@ -14432,6 +14441,7 @@
                       "spec": {
                         "title": "Issues",
                         "collapse": false,
+                        "hideHeader": true,
                         "layout": {
                           "kind": "GridLayout",
                           "spec": {
@@ -14467,7 +14477,7 @@
                             "columnWidthMode": "custom",
                             "columnWidth": 300,
                             "rowHeightMode": "custom",
-                            "rowHeight": 430,
+                            "rowHeight": 354,
                             "fillScreen": false,
                             "items": [
                               {
@@ -14520,7 +14530,7 @@
                                   "x": 0,
                                   "y": 0,
                                   "width": 12,
-                                  "height": 20,
+                                  "height": 10,
                                   "element": {
                                     "kind": "ElementReference",
                                     "name": "panel-50"
@@ -14533,7 +14543,7 @@
                                   "x": 12,
                                   "y": 0,
                                   "width": 12,
-                                  "height": 20,
+                                  "height": 10,
                                   "element": {
                                     "kind": "ElementReference",
                                     "name": "panel-54"
@@ -14558,7 +14568,7 @@
                             "columnWidthMode": "custom",
                             "columnWidth": 300,
                             "rowHeightMode": "custom",
-                            "rowHeight": 372,
+                            "rowHeight": 354,
                             "fillScreen": false,
                             "items": [
                               {
@@ -14935,6 +14945,7 @@
                       "spec": {
                         "title": "Alerts over time",
                         "collapse": false,
+                        "hideHeader": true,
                         "layout": {
                           "kind": "GridLayout",
                           "spec": {

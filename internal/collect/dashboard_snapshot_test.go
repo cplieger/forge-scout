@@ -40,7 +40,7 @@ var volatileLabels = []string{"age_days", "idle_days", "age", "rank", "forge_ran
 // snapshotLabels are the labels each family's rows may carry: the item's
 // identity and what the dashboard derives from it alone.
 var snapshotLabels = map[string][]string{
-	"open pull request": {"connection", "forge", "repo", "number", "ref", "title", "author", "from", "tags", "draft", "checks", "url", "created_at", "updated_at", "link", "item"},
+	"open pull request": {"connection", "forge", "repo", "number", "ref", "title", "author", "from", "tags", "draft", "checks", "why", "url", "created_at", "updated_at", "link", "item"},
 	"open issue":        {"connection", "forge", "repo", "number", "ref", "title", "author", "from", "tags", "url", "created_at", "updated_at", "link", "item"},
 	// A failing workflow's url and run_id are its newest failed run, which
 	// changes only with a new failure.
