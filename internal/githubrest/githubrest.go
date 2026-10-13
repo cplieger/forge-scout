@@ -1,7 +1,8 @@
 // Package githubrest reads the two GitHub REST routes forgeapi does not model:
 // a repository's open code-scanning alerts and its workflow definitions. Every
 // status is classified on its code, never on message text, through one table
-// of what each route's answers mean.
+// of what each route's answers mean. Its reads go through forgeapi's read
+// cache, which revalidates a page it holds.
 package githubrest
 
 import (
@@ -20,6 +21,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cplieger/forgeapi/readcache"
 	"github.com/cplieger/github-scout/internal/forge"
 	"github.com/cplieger/github-scout/internal/ghquota"
 	"github.com/cplieger/github-scout/internal/urlsafe"
@@ -45,6 +47,7 @@ var errNotFound = errors.New("not found")
 type Client struct {
 	http    *http.Client
 	meter   *ghquota.Meter
+	cache   *readcache.Transport
 	base    string
 	token   string
 	version string
@@ -55,8 +58,10 @@ type Client struct {
 // X-GitHub-Api-Version, the one forgeapi pins, so both clients read one
 // version's shapes. retry overrides the default retry policy. hc is copied,
 // never changed: every request it sends, each redirect hop included, is
-// admitted by meter, the connection's quota, which sees its response.
-func New(hc *http.Client, base, token, version string, meter *ghquota.Meter, logger *slog.Logger, retry ...httpx.Option) *Client {
+// admitted by meter, the connection's quota, which sees its response. Its
+// transport sees each request as sent, a validator the read cache adds
+// included.
+func New(hc *http.Client, base, token, version string, meter *ghquota.Meter, logger *slog.Logger, retry ...httpx.Option) (*Client, error) {
 	opts := make([]httpx.DoOption, 0, len(retry)+2)
 	for _, o := range retry {
 		opts = append(opts, o)
@@ -66,9 +71,23 @@ func New(hc *http.Client, base, token, version string, meter *ghquota.Meter, log
 	if inner == nil {
 		inner = http.DefaultTransport
 	}
+	// GitHub bills no 304 to a conditional request
+	// (https://docs.github.com/en/rest/using-the-rest-api/best-practices-for-using-the-rest-api#use-conditional-requests-if-appropriate).
+	// A read pages by number and reads no header of a 200, so a served
+	// answer holds none.
+	cache, err := readcache.NewTransport(admitting{next: meter.Observe(inner), meter: meter}, readcache.WithFreeNotModified(true))
+	if err != nil {
+		return nil, fmt.Errorf("github rest read cache: %w", err)
+	}
 	metered := *hc
-	metered.Transport = admitting{next: meter.Observe(inner), meter: meter}
-	return &Client{http: &metered, base: strings.TrimRight(base, "/"), token: token, version: version, retry: opts, meter: meter}
+	metered.Transport = cache
+	return &Client{http: &metered, cache: cache, base: strings.TrimRight(base, "/"), token: token, version: version, retry: opts, meter: meter}, nil
+}
+
+// ReadCache is what the client's read cache did since it was built.
+func (c *Client) ReadCache() forge.ReadCache {
+	s := c.cache.State()
+	return forge.ReadCache{Hits: s.Hits, Misses: s.Misses, Saved: s.Saved}
 }
 
 // BeginScan starts a scan on the connection's quota (see ghquota.Meter).

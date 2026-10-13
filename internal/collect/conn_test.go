@@ -17,6 +17,18 @@ import (
 	"github.com/cplieger/httpx/v5"
 )
 
+// restClient is a GitHub REST client of base making one attempt per request,
+// each bounded by timeout.
+func restClient(t *testing.T, base string, timeout time.Duration) *githubrest.Client {
+	t.Helper()
+	c, err := githubrest.New(httpx.NewClient(timeout), base, "test-token", "2026-03-10", armedMeter(),
+		slog.New(slog.NewTextHandler(io.Discard, nil)), httpx.WithMaxAttempts(1))
+	if err != nil {
+		t.Fatalf("Setup: githubrest.New = %v", err)
+	}
+	return c
+}
+
 func TestScan_github_rest_403_with_throttle_headers_is_a_rate_limit_stop(t *testing.T) {
 	tests := []struct{ name, remaining, retryAfter string }{
 		{name: "budget_spent", remaining: "0"},
@@ -34,8 +46,7 @@ func TestScan_github_rest_403_with_throttle_headers_is_a_rate_limit_stop(t *test
 			}))
 			t.Cleanup(srv.Close)
 			ep := githubEndpoint("gh")
-			ep.rest = githubrest.New(httpx.NewClient(5*time.Second), srv.URL, "test-token", "2026-03-10", armedMeter(),
-				slog.New(slog.NewTextHandler(io.Discard, nil)), httpx.WithMaxAttempts(1))
+			ep.rest = restClient(t, srv.URL, 5*time.Second)
 			h := newHarness(t, ep)
 			h.scan(t)
 			if s := lineFor(t, h.rec, "scan stopped", "gh"); s["reason"] != "rate_limited" || s["phase"] != "security" {
@@ -69,8 +80,7 @@ func TestScan_a_github_rest_403_with_no_throttle_header_sends_no_further_github_
 	t.Cleanup(srv.Close)
 	ep := githubEndpoint("gh")
 	ep.conn.repos["o"] = []forge.Repo{{Path: "o/a", DefaultBranch: "main"}, {Path: "o/b", DefaultBranch: "main"}}
-	ep.rest = githubrest.New(httpx.NewClient(5*time.Second), srv.URL, "test-token", "2026-03-10", armedMeter(),
-		slog.New(slog.NewTextHandler(io.Discard, nil)), httpx.WithMaxAttempts(1))
+	ep.rest = restClient(t, srv.URL, 5*time.Second)
 	h := newHarness(t, ep)
 	h.scan(t)
 	if n := requests.Load(); n != 1 {
@@ -95,8 +105,7 @@ func TestScan_a_request_timeout_under_a_live_scan_is_a_failed_read(t *testing.T)
 	}))
 	t.Cleanup(srv.Close)
 	ep := githubEndpoint("gh")
-	ep.rest = githubrest.New(httpx.NewClient(2*time.Millisecond), srv.URL, "test-token", "2026-03-10", armedMeter(),
-		slog.New(slog.NewTextHandler(io.Discard, nil)), httpx.WithMaxAttempts(1))
+	ep.rest = restClient(t, srv.URL, 2*time.Millisecond)
 	h := newHarness(t, ep)
 	h.scan(t)
 	c := lineFor(t, h.rec, "scan complete", "gh")
@@ -113,8 +122,7 @@ func TestScan_a_github_workflows_404_is_never_read_as_no_disabled_workflows(t *t
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNotFound) }))
 	t.Cleanup(srv.Close)
 	ep := githubEndpoint("gh")
-	ep.rest = githubrest.New(httpx.NewClient(5*time.Second), srv.URL, "test-token", "2026-03-10", armedMeter(),
-		slog.New(slog.NewTextHandler(io.Discard, nil)), httpx.WithMaxAttempts(1))
+	ep.rest = restClient(t, srv.URL, 5*time.Second)
 	h := newHarness(t, ep)
 	h.scan(t)
 	c := lineFor(t, h.rec, "scan complete", "gh")

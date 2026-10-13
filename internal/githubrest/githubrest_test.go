@@ -19,6 +19,7 @@ import (
 
 	"github.com/cplieger/github-scout/internal/forge"
 	"github.com/cplieger/github-scout/internal/ghquota"
+	"github.com/cplieger/github-scout/internal/spend"
 	"github.com/cplieger/httpx/v5"
 	"github.com/cplieger/ssrf/v4"
 )
@@ -42,7 +43,11 @@ func newClientWith(t *testing.T, h http.HandlerFunc, retry ...httpx.Option) *Cli
 	t.Helper()
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
-	return New(httpx.NewClient(5*time.Second), srv.URL, "test-token", testVersion, armed(), slog.New(slog.DiscardHandler), retry...)
+	c, err := New(httpx.NewClient(5*time.Second), srv.URL, "test-token", testVersion, armed(), slog.New(slog.DiscardHandler), retry...)
+	if err != nil {
+		t.Fatalf("Setup: New = %v", err)
+	}
+	return c
 }
 
 var repo = forge.Repo{Path: "o/r"}
@@ -589,7 +594,9 @@ func TestBudget_a_followed_redirect_is_admitted_and_charged(t *testing.T) {
 
 func TestNew_leaves_the_callers_client_unchanged(t *testing.T) {
 	hc := httpx.NewClient(5 * time.Second)
-	New(hc, "https://api.example.test", "test-token", testVersion, armed(), slog.New(slog.DiscardHandler))
+	if _, err := New(hc, "https://api.example.test", "test-token", testVersion, armed(), slog.New(slog.DiscardHandler)); err != nil {
+		t.Fatalf("New = %v", err)
+	}
 	if hc.Transport != nil {
 		t.Errorf("New replaced the caller's transport with %T, want it untouched", hc.Transport)
 	}
@@ -680,8 +687,11 @@ func TestHTTPClient_dials_a_private_address_only_when_the_connection_allows_it(t
 			}
 			base := "http://forge.example.test:" + u.Port()
 			resolver := &loopbackResolver{}
-			c := New(httpClient(base, private, true, ssrf.WithResolver(resolver)), base, "test-token", testVersion, armed(),
+			c, err := New(httpClient(base, private, true, ssrf.WithResolver(resolver)), base, "test-token", testVersion, armed(),
 				slog.New(slog.DiscardHandler), httpx.WithMaxAttempts(1))
+			if err != nil {
+				t.Fatalf("Setup: New = %v", err)
+			}
 			_, err = c.CodeScanningAlerts(t.Context(), repo)
 			if resolver.lookups.Load() == 0 {
 				t.Fatalf("CodeScanningAlerts resolved %s 0 times, want the dial to go through the resolver", base)
@@ -711,5 +721,97 @@ func TestReads_a_rate_limit_carries_the_rest_pools_budget(t *testing.T) {
 	_, err = c.Workflows(t.Context(), repo)
 	if bs, ok := errors.AsType[*forge.BudgetStopError](err); !errors.Is(err, forge.ErrReadDeferred) || !ok || !bs.Budget.Reset.Equal(reset) {
 		t.Errorf("Workflows held at the reserve = %v, want forge.ErrReadDeferred carrying the REST pool's budget", err)
+	}
+}
+
+// validating answers body with an ETag, and 304 to a request naming it, as
+// GitHub answers a conditional request
+// (https://docs.github.com/en/rest/using-the-rest-api/best-practices-for-using-the-rest-api#use-conditional-requests-if-appropriate),
+// recording the If-None-Match each request carried.
+func validating(body string, asked *[]string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		*asked = append(*asked, r.Header.Get("If-None-Match"))
+		w.Header().Set("ETag", `"v1"`)
+		w.Header().Set("X-RateLimit-Remaining", "4000")
+		if r.Header.Get("If-None-Match") == `"v1"` {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		io.WriteString(w, body)
+	}
+}
+
+// meteredClient serves h to a client making one attempt per request, every
+// attempt counted by the returned spend meter, priced as GitHub's.
+func meteredClient(t *testing.T, h http.HandlerFunc) (*Client, *spend.Meter) {
+	t.Helper()
+	srv := httptest.NewServer(h)
+	t.Cleanup(srv.Close)
+	spent := new(spend.Meter)
+	spent.Name(forge.ProductGitHub)
+	hc := httpx.NewClient(5 * time.Second)
+	hc.Transport = spent.Observe(http.DefaultTransport)
+	c, err := New(hc, srv.URL, "test-token", testVersion, armed(), slog.New(slog.DiscardHandler), httpx.WithMaxAttempts(1))
+	if err != nil {
+		t.Fatalf("Setup: New = %v", err)
+	}
+	return c, spent
+}
+
+func TestReads_an_unchanged_page_is_revalidated_and_billed_nothing(t *testing.T) {
+	for _, tc := range []struct {
+		read func(c *Client) (int, error)
+		name string
+		body string
+	}{
+		{name: "code_scanning", body: alertsPage(1, 2), read: func(c *Client) (int, error) {
+			l, err := c.CodeScanningAlerts(t.Context(), repo)
+			return len(l.Rows), err
+		}},
+		{name: "workflows", body: workflowsPage("active", "disabled_manually"), read: func(c *Client) (int, error) {
+			l, err := c.Workflows(t.Context(), repo)
+			return len(l.Rows), err
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var asked []string
+			c, spent := meteredClient(t, validating(tc.body, &asked))
+			if n, err := tc.read(c); err != nil || n != 2 {
+				t.Fatalf("Setup: first read = %d rows, %v, want 2", n, err)
+			}
+			before := spent.Spent()
+			n, err := tc.read(c)
+			if err != nil || n != 2 {
+				t.Errorf("second read = %d rows, %v, want the 2 rows of the held answer", n, err)
+			}
+			if !slices.Equal(asked, []string{"", `"v1"`}) {
+				t.Errorf("If-None-Match sent = %q, want none on the first read and the held ETag on the second", asked)
+			}
+			if got, want := spent.Spent().Minus(before), (spend.Spend{Sent: 1}); got != want {
+				t.Errorf("spend of the second read = %+v, want %+v: one attempt on the wire, its conditional 304 billed nothing", got, want)
+			}
+			if got, want := c.ReadCache(), (forge.ReadCache{Hits: 1, Misses: 1, Saved: 1}); got != want {
+				t.Errorf("ReadCache = %+v, want %+v: GitHub bills no 304 to a conditional request", got, want)
+			}
+		})
+	}
+}
+
+func TestReads_a_304_to_an_unconditional_request_is_billed_and_fails_the_read(t *testing.T) {
+	var calls atomic.Int32
+	c, spent := meteredClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.Header().Set("X-RateLimit-Remaining", "4000")
+		w.WriteHeader(http.StatusNotModified)
+	})
+	got, err := c.Workflows(t.Context(), repo)
+	if err == nil {
+		t.Errorf("Workflows answered 304 with nothing held = %+v, want a failed read, never an empty listing", got)
+	}
+	if s := spent.Spent(); s.Sent != int(calls.Load()) || s.REST != s.Sent || s.Sent < 1 {
+		t.Errorf("spend = %+v over %d requests, want each attempt sent and billed: GitHub exempts only a 304 to a conditional request", s, calls.Load())
+	}
+	if rc := c.ReadCache(); rc.Saved != 0 || rc.Hits != 0 {
+		t.Errorf("ReadCache = %+v, want no hit or saving from a 304 nothing held vouched for", rc)
 	}
 }

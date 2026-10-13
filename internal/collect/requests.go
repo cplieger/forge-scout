@@ -46,10 +46,13 @@ func (r *connResult) enter(phase string) {
 	r.phase = phase
 }
 
-// readCache is what the connection's read cache did since cs.cache, its
-// counts when the last scan read them or zero since an open.
+// readCache is what the read caches of the connection's clients did since
+// cs.cache, their counts when the last scan read them or zero since an open.
 func readCache(cs *connState) forge.ReadCache {
 	now := cs.conn.ReadCache()
+	if cs.gh != nil {
+		now = now.Plus(cs.gh.ReadCache())
+	}
 	d := now.Minus(cs.cache)
 	cs.cache = now
 	return d

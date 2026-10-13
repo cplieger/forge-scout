@@ -51,7 +51,7 @@ func TestWire_a_repeated_read_is_revalidated_and_billed_by_its_forge(t *testing.
 				t.Fatalf("Setup: Discover = %v", err)
 			}
 			api := d.ByOwner["acme"][slices.IndexFunc(d.ByOwner["acme"], func(r forge.Repo) bool { return r.Path == "acme/api" })]
-			since := wireNow.Add(-72 * time.Hour).Truncate(time.Hour)
+			since := wireNow.Add(-72 * time.Hour)
 			first, err := c.RunsSince(t.Context(), api, since)
 			if err != nil {
 				t.Fatalf("Setup: RunsSince = %v", err)
@@ -74,6 +74,44 @@ func TestWire_a_repeated_read_is_revalidated_and_billed_by_its_forge(t *testing.
 				t.Errorf("spend of the second listing = %+v, want %+v: the 304 is sent, and billed %d", got, want, tc.billed)
 			}
 		})
+	}
+}
+
+func TestWire_a_run_listing_asks_one_request_all_day(t *testing.T) {
+	w := world()
+	w.Validators = true
+	spent := new(spend.Meter)
+	c, srv := openMetered(t, forgeconntest.GitHub, w, spent)
+	d, err := c.Discover(t.Context(), []string{"acme"})
+	if err != nil {
+		t.Fatalf("Setup: Discover = %v", err)
+	}
+	api := d.ByOwner["acme"][slices.IndexFunc(d.ByOwner["acme"], func(r forge.Repo) bool { return r.Path == "acme/api" })]
+	day := wireNow.Add(-72 * time.Hour).Truncate(24 * time.Hour)
+	runRequests := func() []string {
+		var out []string
+		for _, r := range srv.Requests() {
+			if strings.Contains(r, "/actions/runs") {
+				out = append(out, r)
+			}
+		}
+		return out
+	}
+	if _, err := c.RunsSince(t.Context(), api, day.Add(time.Minute)); err != nil {
+		t.Fatalf("Setup: RunsSince = %v", err)
+	}
+	cacheBefore, spentBefore := c.ReadCache(), spent.Spent()
+	if _, err := c.RunsSince(t.Context(), api, day.Add(23*time.Hour)); err != nil {
+		t.Fatalf("second RunsSince = %v", err)
+	}
+	if got := runRequests(); len(got) != 2 || got[0] != got[1] {
+		t.Errorf("run requests = %v, want one request sent twice: two bounds on one UTC day ask the same listing", got)
+	}
+	if got, want := c.ReadCache().Minus(cacheBefore), (forge.ReadCache{Hits: 1, Saved: 1}); got != want {
+		t.Errorf("ReadCache across the later listing of the day = %+v, want %+v: it revalidates the first", got, want)
+	}
+	if got := spent.Spent().Minus(spentBefore); got.REST != 0 {
+		t.Errorf("spend of the later listing of the day = %+v, want no billed request", got)
 	}
 }
 

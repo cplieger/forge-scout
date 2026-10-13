@@ -361,3 +361,8 @@ type ReadCache struct {
 func (r ReadCache) Minus(s ReadCache) ReadCache {
 	return ReadCache{Hits: r.Hits - s.Hits, Misses: r.Misses - s.Misses, Saved: r.Saved - s.Saved}
 }
+
+// Plus is r and s together.
+func (r ReadCache) Plus(s ReadCache) ReadCache {
+	return ReadCache{Hits: r.Hits + s.Hits, Misses: r.Misses + s.Misses, Saved: r.Saved + s.Saved}
+}

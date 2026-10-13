@@ -173,8 +173,8 @@ func TestRunsSince_maps_completed_runs_sets_unmapped_ones_apart_and_dates_the_ol
 	if err != nil {
 		t.Fatalf("RunsSince = %v", err)
 	}
-	if !sent.SinceSet || !sent.Since.Equal(since) {
-		t.Errorf("RunsSince sent since %v (set %t), want %v", sent.Since, sent.SinceSet, since)
+	if want := since.Truncate(24 * time.Hour); !sent.SinceSet || !sent.Since.Equal(want) {
+		t.Errorf("RunsSince sent since %v (set %t), want %v", sent.Since, sent.SinceSet, want)
 	}
 	if len(list.Rows) != 3 || list.End != forge.EndWhole {
 		t.Fatalf("RunsSince = %d runs ending %v, want 3 runs, whole", len(list.Rows), list.End)
@@ -202,6 +202,121 @@ func TestRunsSince_maps_completed_runs_sets_unmapped_ones_apart_and_dates_the_ol
 	if list.Rows[2].Trigger != forge.TriggerPullRequest {
 		t.Errorf("RunsSince pull request trigger = %q, want %q, the spelling the collector excludes from the default branch",
 			list.Rows[2].Trigger, forge.TriggerPullRequest)
+	}
+}
+
+func TestRunsSince_asks_from_the_start_of_the_UTC_day_since_falls_on(t *testing.T) {
+	day := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		since, want time.Time
+	}{
+		{since: day, want: day},
+		{since: day.Add(47*time.Minute + 3*time.Second), want: day},
+		{since: day.Add(23*time.Hour + 59*time.Minute), want: day},
+		{since: day.Add(11 * time.Hour).In(time.FixedZone("UTC+14", 14*3600)), want: day},
+		{since: day.Add(24 * time.Hour), want: day.Add(24 * time.Hour)},
+	} {
+		var sent forgeapi.ListSettings
+		f := &fakeAPI{runs: func(opts ...forgeapi.ListOption) (forgeapi.Page[forgeapi.Run], error) {
+			sent = settings(t, opts)
+			return forgeapi.Page[forgeapi.Run]{}, nil
+		}}
+		if _, err := client(t, f).RunsSince(t.Context(), ghRepo, tc.since); err != nil {
+			t.Fatalf("RunsSince(%s) = %v", tc.since, err)
+		}
+		if !sent.SinceSet || !sent.Since.Equal(tc.want) {
+			t.Errorf("RunsSince(%s) asked since %s (set %t), want %s: the start of its UTC day, so the request stays the same all day",
+				tc.since, sent.Since, sent.SinceSet, tc.want)
+		}
+	}
+}
+
+func TestRunsSince_drops_the_rows_created_before_since(t *testing.T) {
+	since := time.Date(2026, 10, 1, 9, 30, 0, 0, time.UTC)
+	f := &fakeAPI{runs: func(...forgeapi.ListOption) (forgeapi.Page[forgeapi.Run], error) {
+		return forgeapi.Page[forgeapi.Run]{Items: []forgeapi.Run{
+			{Ref: forgeapi.RunRef{ID: 1}, Name: "CI", CreatedAt: since, State: forgeapi.CheckPassing},
+			{Ref: forgeapi.RunRef{ID: 2}, Name: "CI", CreatedAt: since.Add(-time.Second), State: forgeapi.CheckFailing},
+			{Ref: forgeapi.RunRef{ID: 3}, Name: "CI", CreatedAt: since.Add(-time.Hour), State: forgeapi.CheckPending},
+			{Ref: forgeapi.RunRef{ID: 4}, Name: "CI", CreatedAt: since.Add(-2 * time.Hour), State: forgeapi.CheckUnknown},
+			{Ref: forgeapi.RunRef{ID: 5}, Name: "CI", CreatedAt: since.Add(time.Hour), State: forgeapi.CheckPending},
+			{Ref: forgeapi.RunRef{ID: 6}, Name: "CI", State: forgeapi.CheckPassing},
+		}}, nil
+	}}
+	list, err := client(t, f).RunsSince(t.Context(), ghRepo, since)
+	if err != nil {
+		t.Fatalf("RunsSince = %v", err)
+	}
+	var ids []int64
+	for _, r := range list.Rows {
+		ids = append(ids, r.ID)
+	}
+	if !slices.Equal(ids, []int64{1, 6}) || len(list.Unmapped) != 0 || list.End != forge.EndWhole {
+		t.Errorf("RunsSince rows %v, unmapped %+v, end %v, want runs 1 and 6, none unmapped, whole: a run created before since is dropped in every state, and one with no creation time reaches the caller",
+			ids, list.Unmapped, list.End)
+	}
+	if !list.Oldest.Equal(since) || !list.OldestPending.Equal(since.Add(time.Hour)) {
+		t.Errorf("RunsSince oldest %s, oldest pending %s, want %s and %s: a dropped row dates nothing", list.Oldest, list.OldestPending, since, since.Add(time.Hour))
+	}
+}
+
+func TestRunsSince_a_listing_the_page_ceiling_stopped_is_cut(t *testing.T) {
+	since := time.Date(2026, 10, 1, 9, 30, 0, 0, time.UTC)
+	gitea := forge.Repo{Path: "o/r"}.WithHandle(forgeapi.RepoRef{Family: forgeapi.FamilyGitea})
+	// pages answers one run per call, newest id first, dated by stamp, and
+	// always leaves a continuation, so the walk stops at the ceiling.
+	pages := func(stamp func(page int) time.Time) func(...forgeapi.ListOption) (forgeapi.Page[forgeapi.Run], error) {
+		calls := 0
+		return func(...forgeapi.ListOption) (forgeapi.Page[forgeapi.Run], error) {
+			calls++
+			return forgeapi.Page[forgeapi.Run]{
+				Items: []forgeapi.Run{{Ref: forgeapi.RunRef{ID: int64(1000 - calls)}, Name: "CI", CreatedAt: stamp(calls), State: forgeapi.CheckPassing}},
+				Next:  "more", Partial: &forgeapi.Partial{Reason: forgeapi.PartialPaginationCap},
+			}, nil
+		}
+	}
+	for _, tc := range []struct {
+		runs    func(...forgeapi.ListOption) (forgeapi.Page[forgeapi.Run], error)
+		repo    forge.Repo
+		name    string
+		product forgeapi.Product
+	}{
+		{name: "ceiling_past_since", product: forgeapi.ProductGitHub, repo: ghRepo, runs: pages(func(page int) time.Time {
+			return since.Add(10*time.Hour - time.Duration(page-1)*time.Hour)
+		})},
+		{name: "ceiling_short_of_since", product: forgeapi.ProductGitHub, repo: ghRepo, runs: pages(func(page int) time.Time {
+			return since.Add(100*time.Hour - time.Duration(page-1)*time.Hour)
+		})},
+		// forgeapi lets a Gitea-family run's creation stamp fall up to a
+		// minute behind an older id's, so the last page read holding a run
+		// a second before since says nothing of the unread page after it.
+		{name: "gitea_ceiling_one_second_past_since", product: forgeapi.ProductGitea, repo: gitea, runs: pages(func(page int) time.Time {
+			if page == maxRunPages {
+				return since.Add(-time.Second)
+			}
+			return since.Add(time.Duration(maxRunPages-page) * time.Minute)
+		})},
+		{name: "result_window_past_since", product: forgeapi.ProductGitHub, repo: ghRepo, runs: func(...forgeapi.ListOption) (forgeapi.Page[forgeapi.Run], error) {
+			return forgeapi.Page[forgeapi.Run]{
+				Items: []forgeapi.Run{
+					{Ref: forgeapi.RunRef{ID: 2}, Name: "CI", CreatedAt: since.Add(time.Hour), State: forgeapi.CheckPassing},
+					{Ref: forgeapi.RunRef{ID: 1}, Name: "CI", CreatedAt: since.Add(-time.Hour), State: forgeapi.CheckPassing},
+				},
+				Partial: &forgeapi.Partial{Reason: forgeapi.PartialResultWindow},
+			}, nil
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			list, err := client(t, &fakeAPI{product: tc.product, runs: tc.runs}).RunsSince(t.Context(), tc.repo, since)
+			if err != nil || list.End != forge.EndCut {
+				t.Errorf("RunsSince = ending %v, %v, want cut: a run read past since proves nothing of the pages left unread", list.End, err)
+			}
+			for _, r := range list.Rows {
+				if r.CreatedAt.Before(since) {
+					t.Errorf("RunsSince row %d created %s, before since %s", r.ID, r.CreatedAt, since)
+				}
+			}
+		})
 	}
 }
 
