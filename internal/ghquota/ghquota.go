@@ -57,16 +57,16 @@ func (m *Meter) BeginScan() {
 // GitHub answers for a missing permission and for a secondary limit alike
 // and asks a limited client to stop on
 // (https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api),
-// and forge.ErrReadDeferred while the shared REST pool is at the read
-// reserve.
+// and forge.ErrReadDeferred, carried by a *forge.BudgetStopError with that
+// pool's budget, while the shared REST pool is at the read reserve.
 func (m *Meter) Admit() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	switch {
-	case m.refused:
+	if m.refused {
 		return forge.ErrRefused
-	case m.pool(corePool).Reserved():
-		return forge.ErrReadDeferred
+	}
+	if b := m.pool(corePool); b.Reserved() {
+		return &forge.BudgetStopError{Err: forge.ErrReadDeferred, Budget: b}
 	}
 	return nil
 }

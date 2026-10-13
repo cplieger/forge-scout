@@ -334,3 +334,30 @@ func (e *OpenError) Error() string { return e.Err.Error() }
 
 // Unwrap returns the failure, which keeps its sentinel.
 func (e *OpenError) Unwrap() error { return e.Err }
+
+// BudgetStopError is a read held back or refused for its budget, carrying the
+// budget of the pool that stopped it: GitHub keeps one for REST and one for
+// GraphQL, and only the adapter that read knows which it drew on.
+type BudgetStopError struct {
+	// Err is ErrReadDeferred or ErrRateLimited, wrapped or not.
+	Err    error
+	Budget Budget
+}
+
+func (e *BudgetStopError) Error() string { return e.Err.Error() }
+
+// Unwrap returns the failure, which keeps its sentinel.
+func (e *BudgetStopError) Unwrap() error { return e.Err }
+
+// ReadCache is what a client's read cache did: Hits are reads the forge
+// confirmed unchanged and a held answer served, Misses every other cacheable
+// read the forge answered in full, and Saved the hits the forge billed
+// nothing for.
+type ReadCache struct {
+	Hits, Misses, Saved int
+}
+
+// Minus is what r holds beyond s.
+func (r ReadCache) Minus(s ReadCache) ReadCache {
+	return ReadCache{Hits: r.Hits - s.Hits, Misses: r.Misses - s.Misses, Saved: r.Saved - s.Saved}
+}

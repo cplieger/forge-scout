@@ -92,6 +92,17 @@ func TestAdmit_holds_reads_at_the_reserve_until_the_window_renews(t *testing.T) 
 	}
 }
 
+func TestAdmit_a_read_held_at_the_reserve_carries_the_rest_pools_budget(t *testing.T) {
+	m := armed(t0)
+	answer(t, m, http.StatusOK, "X-RateLimit-Remaining", strconv.Itoa(forge.ReadReserve-3), "X-RateLimit-Reset", reset(t0.Add(time.Hour)))
+	answer(t, m, http.StatusOK, "X-RateLimit-Remaining", "4000", "X-RateLimit-Resource", "graphql", "X-RateLimit-Reset", reset(t0.Add(2*time.Hour)))
+	err := m.Admit()
+	bs, ok := errors.AsType[*forge.BudgetStopError](err)
+	if !errors.Is(err, forge.ErrReadDeferred) || !ok || bs.Budget != m.Budget() {
+		t.Errorf("Admit at the reserve = %#v, want forge.ErrReadDeferred carrying the REST pool's budget %+v, which held it", err, m.Budget())
+	}
+}
+
 func TestBudget_is_the_shared_rest_pool_whatever_the_other_pools_report(t *testing.T) {
 	m := armed(t0)
 	answer(t, m, http.StatusOK, "X-RateLimit-Remaining", "4000", "X-RateLimit-Reset", reset(t0.Add(time.Hour)))

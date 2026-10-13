@@ -20,6 +20,7 @@ import (
 	"github.com/cplieger/github-scout/internal/forge"
 	"github.com/cplieger/github-scout/internal/ghquota"
 	"github.com/cplieger/github-scout/internal/runstate"
+	"github.com/cplieger/github-scout/internal/spend"
 	"github.com/cplieger/slogx/capture"
 )
 
@@ -62,7 +63,19 @@ type fakeConn struct {
 	// quota, when set, is the GitHub quota meter both clients share, which
 	// every read is sent through.
 	quota *fakeQuota
+	// spent is the connection's spend meter, which every read is sent
+	// through once the connection opens.
+	spent *spend.Meter
+	// points is the GraphQL points each "<op>" charges, as the adapter
+	// charges a document's reported price.
+	points map[string]int
+	// cache is the read cache's counts since the connection opened.
+	cache forge.ReadCache
 }
+
+// documentOps are the reads forgeapi's GitHub family answers with a GraphQL
+// document.
+var documentOps = map[string]bool{"discover": true, "prs": true, "issues": true, "checks": true}
 
 // fakeQuota sends each fake GitHub read through a real ghquota.Meter as the
 // response it stands for: one request less of the shared budget, a 403 with
@@ -87,31 +100,54 @@ type roundTrip func(*http.Request) (*http.Response, error)
 
 func (f roundTrip) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
-// send reports one sent read's answer err to the meter and returns err.
-func (q *fakeQuota) send(err error) error {
+// headers is the rate-limit headers of the next response, one request less
+// of the shared budget, none without a quota.
+func (q *fakeQuota) headers() http.Header {
+	h := http.Header{}
 	if q == nil {
-		return err
-	}
-	status := http.StatusOK
-	if errors.Is(err, forge.ErrForbidden) {
-		status = http.StatusForbidden
+		return h
 	}
 	q.remaining--
 	q.least = min(q.least, q.remaining)
-	h := http.Header{}
 	h.Set("X-RateLimit-Remaining", strconv.Itoa(q.remaining))
 	if !q.noReset {
 		h.Set("X-RateLimit-Reset", strconv.FormatInt(q.reset.Unix(), 10))
 	}
-	answer := roundTrip(func(*http.Request) (*http.Response, error) {
+	return h
+}
+
+// wire sends one read of op through the meters the connection's clients
+// share, as the response its answer err stands for: a 403 with no
+// rate-limit header for forge.ErrForbidden, else a 200, to the GraphQL
+// endpoint for a GitHub document. It returns err.
+func (f *fakeConn) wire(op string, err error) error {
+	status := http.StatusOK
+	if errors.Is(err, forge.ErrForbidden) {
+		status = http.StatusForbidden
+	}
+	h := f.quota.headers()
+	var next http.RoundTripper = roundTrip(func(*http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: status, Header: h, Body: http.NoBody}, nil
 	})
-	req, rerr := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://api.github.test/", http.NoBody)
+	if f.spent != nil {
+		next = f.spent.Observe(next)
+	}
+	if f.quota != nil {
+		next = f.quota.meter.Observe(next)
+	}
+	url, document := "https://api.github.test/api/v3/"+op, f.product == forge.ProductGitHub && documentOps[op]
+	if document {
+		url = "https://api.github.test/api/graphql"
+	}
+	req, rerr := http.NewRequestWithContext(context.Background(), http.MethodGet, url, http.NoBody)
 	if rerr != nil {
 		return rerr
 	}
-	if resp, rerr := q.meter.Observe(answer).RoundTrip(req); rerr == nil {
+	if resp, rerr := next.RoundTrip(req); rerr == nil {
 		resp.Body.Close()
+	}
+	if document && f.spent != nil {
+		f.spent.ChargePoints(f.points[op])
 	}
 	return err
 }
@@ -137,13 +173,14 @@ func (f *fakeConn) call(ctx context.Context, op, key string) error {
 	if b, ok := f.budgetAfter[op+" "+key]; ok {
 		f.budget = b
 	}
-	return f.quota.send(f.errs[op+" "+key])
+	return f.wire(op, f.errs[op+" "+key])
 }
 
-func (f *fakeConn) Product() forge.Product { return f.product }
-func (f *fakeConn) Login() string          { return f.login }
-func (f *fakeConn) Budget() forge.Budget   { return f.budget }
-func (f *fakeConn) Close()                 { f.closed = true }
+func (f *fakeConn) Product() forge.Product     { return f.product }
+func (f *fakeConn) Login() string              { return f.login }
+func (f *fakeConn) Budget() forge.Budget       { return f.budget }
+func (f *fakeConn) ReadCache() forge.ReadCache { return f.cache }
+func (f *fakeConn) Close()                     { f.closed = true }
 
 func (f *fakeConn) Discover(ctx context.Context, owners []string) (forge.Discovery, error) {
 	if err := f.call(ctx, "discover", strings.Join(owners, ",")); err != nil {
@@ -284,7 +321,7 @@ func (g *fakeGitHub) read(ctx context.Context, call string) (sent bool, err erro
 		return false, err
 	}
 	g.calls++
-	return true, g.conn.quota.send(g.errs[call])
+	return true, g.conn.wire("rest", g.errs[call])
 }
 
 func ended(truncated bool) forge.End {
@@ -335,6 +372,8 @@ type endpoint struct {
 	// beforeOpen, when set, runs at the start of each open.
 	beforeOpen func()
 	cfg        config.Connection
+	// opens counts the opens the collector asked for.
+	opens int
 }
 
 func connCfg(name string, owners ...string) config.Connection {
@@ -429,16 +468,20 @@ func (h *harness) build(t *testing.T) {
 		}
 	}
 	h.c = New(t.Context(), &Deps{
-		Open: func(_ context.Context, c *config.Connection) (Conn, GitHubReader, error) {
+		Open: func(_ context.Context, c *config.Connection, spent *spend.Meter) (Conn, GitHubReader, error) {
 			ep := byName[c.Name]
+			ep.opens++
 			if ep.beforeOpen != nil {
 				ep.beforeOpen()
 			}
 			if ep.openErr != nil {
 				return nil, nil, ep.openErr
 			}
-			// The account read an open makes is the meter's first answer.
-			if err := ep.conn.quota.send(nil); err != nil {
+			// The account read an open makes is the meters' first answer.
+			ep.conn.spent = spent
+			spent.Detect()
+			spent.Name(ep.conn.product)
+			if err := ep.conn.wire("account", nil); err != nil {
 				return nil, nil, err
 			}
 			if ep.rest != nil {

@@ -929,9 +929,33 @@ func TestDashboard_item_tables_are_snapshots_or_bounded_event_reads(t *testing.T
 }
 
 // extremeReducers are the scan summary fields whose chart shows the extreme
-// of each interval, as its title says. Every other summary field is a
-// snapshot, so an interval shows each connection's newest scan in it.
+// of each interval, as its title says. A scan amount (see scanAmount) is
+// summed over the interval. Every other summary field is a snapshot, so an
+// interval shows each connection's newest scan in it.
 var extremeReducers = map[string]string{"duration_ms": "max", "budget_remaining": "min"}
+
+// scanAmount reports a field counting what one scan alone did, its requests
+// and its cache's answers, which only a sum over every scan of an interval
+// shows whole; requests is a chart's sum of a read's two request fields.
+func scanAmount(field string) bool {
+	return field == "requests" || strings.HasPrefix(field, "requests_") || strings.HasPrefix(field, "points_") || strings.HasPrefix(field, "cache_")
+}
+
+// trendReducer is the range aggregation a chart of field reads it with.
+func trendReducer(field string) string {
+	if scanAmount(field) {
+		return "sum"
+	}
+	return cmp.Or(extremeReducers[field], "last")
+}
+
+// reducerReason is why a chart reads a summary field with each reducer.
+var reducerReason = map[string]string{
+	"last": "each connection's newest scan in the interval",
+	"sum":  "every scan of the interval, as each counts only what it did",
+	"max":  "the extreme of the interval, as its title says",
+	"min":  "the extreme of the interval, as its title says",
+}
 
 // checkSnapshotTrend applies the snapshot rule to a read of the scan summary
 // lines: a maximum keeps an item an earlier scan in the interval still saw,
@@ -951,8 +975,9 @@ func checkSnapshotTrend(expr string) []string {
 		if unwrapped == nil {
 			continue
 		}
-		if fn := expr[m[2]:m[3]]; fn != "last" && extremeReducers[unwrapped[1]] != fn {
-			problems = append(problems, "reads "+unwrapped[1]+" with "+fn+"_over_time, want last_over_time, each connection's newest scan in the interval")
+		fn, want := expr[m[2]:m[3]], trendReducer(unwrapped[1])
+		if allowed := fn == want || fn == "last" && !scanAmount(unwrapped[1]); !allowed {
+			problems = append(problems, "reads "+unwrapped[1]+" with "+fn+"_over_time, want "+want+"_over_time: "+reducerReason[want])
 		}
 	}
 	return problems
@@ -978,11 +1003,13 @@ func TestDashboard_snapshot_trends_read_each_connections_newest_scan(t *testing.
 			key + "=\"" + key + "\" | msg=`scan complete` | unwrap " + key + " | __error__=\"\" [$__interval]) by (connection, msg))"
 	}
 	bad := map[string]string{
-		"largest open count":   read("max", "open_prs"),
-		"summed scans":         read("sum", "open_issues"),
-		"smallest alert count": read("min", "security_alerts_high"),
-		"largest budget":       read("max", "budget_remaining"),
-		"average scan length":  read("avg", "duration_ms"),
+		"largest open count":     read("max", "open_prs"),
+		"summed scans":           read("sum", "open_issues"),
+		"smallest alert count":   read("min", "security_alerts_high"),
+		"largest budget":         read("max", "budget_remaining"),
+		"average scan length":    read("avg", "duration_ms"),
+		"newest scan's requests": read("last", "requests_rest"),
+		"largest cache saving":   read("max", "cache_saved"),
 	}
 	for name, expr := range bad {
 		if problems := checkSnapshotTrend(expr); len(problems) != 1 {
@@ -991,6 +1018,7 @@ func TestDashboard_snapshot_trends_read_each_connections_newest_scan(t *testing.
 	}
 	for name, expr := range map[string]string{
 		"newest open count": read("last", "open_prs"), "longest scan": read("max", "duration_ms"), "lowest budget": read("min", "budget_remaining"),
+		"requests of every scan": read("sum", "requests_runs"),
 	} {
 		if problems := checkSnapshotTrend(expr); len(problems) != 0 {
 			t.Errorf("checkSnapshotTrend(%s) = %v, want no problem", name, problems)
@@ -2480,5 +2508,64 @@ func TestDashboard_last_scan_per_connection_reads_one_scan_line(t *testing.T) {
 				t.Errorf("checkLastScan(%s) reported nothing, want a violation", name)
 			}
 		})
+	}
+}
+
+// panelRows is the tab and row each element sits in, as "tab / row".
+func panelRows(d map[string]any) map[string]string {
+	out := map[string]string{}
+	var walk func(v any, tab, row string)
+	walk = func(v any, tab, row string) {
+		switch x := v.(type) {
+		case map[string]any:
+			switch x["kind"] {
+			case "TabsLayoutTab":
+				tab, _ = field(x, "spec", "title").(string)
+			case "RowsLayoutRow":
+				row, _ = field(x, "spec", "title").(string)
+			case "ElementReference":
+				name, _ := x["name"].(string)
+				out[name] = tab + " / " + row
+			}
+			for _, y := range x {
+				walk(y, tab, row)
+			}
+		case []any:
+			for _, y := range x {
+				walk(y, tab, row)
+			}
+		}
+	}
+	walk(field(d, "spec", "layout"), "", "")
+	return out
+}
+
+func TestDashboard_shows_every_read_cache_count_beside_the_request_cost(t *testing.T) {
+	d := loadDashboard(t)
+	rows := panelRows(d)
+	unwraps := func(p *dashPanel, key string) bool {
+		return slices.ContainsFunc(p.queries, func(q dashQuery) bool { return strings.Contains(q.expr, "| unwrap "+key+" ") })
+	}
+	var cost, cache []string
+	for _, p := range dashboardPanels(d) {
+		if unwraps(&p, "requests_rest") {
+			cost = append(cost, rows[p.name])
+		}
+		if unwraps(&p, "cache_hits") || unwraps(&p, "cache_misses") || unwraps(&p, "cache_saved") {
+			for _, key := range []string{"cache_hits", "cache_misses", "cache_saved"} {
+				if !unwraps(&p, key) {
+					t.Errorf("panel %q charts the read cache without %s, want hits, misses and saved requests together", p.title, key)
+				}
+			}
+			cache = append(cache, rows[p.name])
+		}
+	}
+	if len(cache) == 0 {
+		t.Fatal("no panel charts the read cache")
+	}
+	for _, at := range cache {
+		if !slices.Contains(cost, at) || !strings.HasPrefix(at, "Scout health / ") {
+			t.Errorf("read cache panel sits in %q, want a Scout health row beside the request cost, which sits in %q", at, cost)
+		}
 	}
 }

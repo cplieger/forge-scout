@@ -23,6 +23,7 @@ import (
 	"github.com/cplieger/github-scout/internal/config"
 	"github.com/cplieger/github-scout/internal/forge"
 	"github.com/cplieger/github-scout/internal/runstate"
+	"github.com/cplieger/github-scout/internal/spend"
 )
 
 // Conn is one open forge connection, as the collector reads it.
@@ -30,6 +31,8 @@ type Conn interface {
 	Product() forge.Product
 	Login() string
 	Budget() forge.Budget
+	// ReadCache is what the connection's read cache did since it opened.
+	ReadCache() forge.ReadCache
 	Close()
 	Discover(ctx context.Context, owners []string) (forge.Discovery, error)
 	OpenPRs(ctx context.Context, owner string) ([]forge.PullRequest, error)
@@ -51,9 +54,10 @@ type GitHubReader interface {
 	Budget() forge.Budget
 }
 
-// Opener opens a connection. It returns a GitHubReader for a GitHub product
+// Opener opens a connection, sending every attempt of it and of the clients
+// it returns through spent. It returns a GitHubReader for a GitHub product
 // and nil for any other.
-type Opener func(ctx context.Context, c *config.Connection) (Conn, GitHubReader, error)
+type Opener func(ctx context.Context, c *config.Connection, spent *spend.Meter) (Conn, GitHubReader, error)
 
 // Deps are the collector's collaborators. Store is required, and the caller
 // closes it. Logger carries neither forge nor connection: the collector
@@ -93,6 +97,9 @@ type Collector struct {
 type connState struct {
 	conn Conn
 	gh   GitHubReader
+	// spent is the connection's spend for the life of the process, across
+	// reopens.
+	spent *spend.Meter
 	// unmapped is the runs in a state forgeapi could not map that the
 	// connection's last scan listed, by repository path and ID.
 	unmapped map[string]bool
@@ -100,6 +107,9 @@ type connState struct {
 	// discovery.
 	lastEmpty string
 	cfg       config.Connection
+	// cache is the open connection's read cache counts as the last scan read
+	// them.
+	cache forge.ReadCache
 	// idx is the connection's place in the configuration.
 	idx int
 }
@@ -118,7 +128,7 @@ func New(ctx context.Context, d *Deps) *Collector {
 		c.now = time.Now
 	}
 	for i := range d.Connections {
-		c.conns = append(c.conns, &connState{cfg: d.Connections[i], idx: i})
+		c.conns = append(c.conns, &connState{cfg: d.Connections[i], idx: i, spent: new(spend.Meter)})
 	}
 	if failed, err := c.store.CleanupTemps(ctx); err != nil || failed > 0 {
 		c.process().Warn("run state temp files not reclaimed", "failed", failed, "error", err)
@@ -186,7 +196,7 @@ var _ fmt.Stringer = Complete
 func (c *Collector) Scan(ctx context.Context) Outcome {
 	start := c.now()
 	sc := &scan{
-		id: start.UnixMilli(), start: start, cutoff: start.Add(-c.lookback).Truncate(time.Second), state: c.store,
+		id: start.UnixMilli(), start: start, cutoff: runWindow(start, c.lookback), state: c.store,
 		gates: c.accountGates(), out: emitter{done: ctx.Done()},
 	}
 	results := make([]*connResult, len(c.conns))
@@ -225,6 +235,14 @@ func (c *Collector) Scan(ctx context.Context) Outcome {
 		}
 	}
 	return Complete
+}
+
+// runWindow is the start of the run listing's window: lookback before start,
+// moved back to the start of its hour. Every scan of an hour then asks the
+// same listing URL, which the read cache can revalidate, and the window only
+// grows.
+func runWindow(start time.Time, lookback time.Duration) time.Time {
+	return start.Add(-lookback).Truncate(time.Hour)
 }
 
 // accountGate holds the connections to one forge until each has opened, so
@@ -375,11 +393,11 @@ func (c *Collector) ensureOpen(ctx context.Context, cs *connState) (opened bool,
 	if cs.conn != nil {
 		return false, nil
 	}
-	conn, gh, err := c.open(ctx, &cs.cfg)
+	conn, gh, err := c.open(ctx, &cs.cfg, cs.spent)
 	if err != nil {
 		return false, err
 	}
-	cs.conn, cs.gh = conn, gh
+	cs.conn, cs.gh, cs.cache = conn, gh, forge.ReadCache{}
 	return true, nil
 }
 

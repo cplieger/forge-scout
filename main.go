@@ -25,6 +25,7 @@ import (
 	"github.com/cplieger/github-scout/internal/ghquota"
 	"github.com/cplieger/github-scout/internal/githubrest"
 	"github.com/cplieger/github-scout/internal/runstate"
+	"github.com/cplieger/github-scout/internal/spend"
 	"github.com/cplieger/health"
 	"github.com/cplieger/scheduler/v4"
 	"github.com/cplieger/slogx"
@@ -191,9 +192,9 @@ func newCollector(ctx context.Context, cfg *config.Config, base *slog.Logger, st
 // opener opens one forge connection, and on GitHub its REST client for the
 // routes forgeapi does not model, the two sharing one quota meter.
 func opener(base *slog.Logger) collect.Opener {
-	return func(ctx context.Context, c *config.Connection) (collect.Conn, collect.GitHubReader, error) {
+	return func(ctx context.Context, c *config.Connection, spent *spend.Meter) (collect.Conn, collect.GitHubReader, error) {
 		meter := ghquota.New(nil)
-		conn, err := forgeconn.Open(ctx, c, base.With("connection", c.Name), meter)
+		conn, err := forgeconn.Open(ctx, c, base.With("connection", c.Name), meter, spent)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -202,8 +203,9 @@ func opener(base *slog.Logger) collect.Opener {
 		}
 		api := githubrest.APIBase(c.URL, c.APIURL)
 		logger := collect.Scope(base, forge.ProductGitHub, c.Name)
-		gh := githubrest.New(githubrest.HTTPClient(api, c.PrivateAddresses, c.AllowPlaintext, logger), api, c.Token, github.APIVersion,
-			meter, logger)
+		hc := githubrest.HTTPClient(api, c.PrivateAddresses, c.AllowPlaintext, logger)
+		hc.Transport = spent.Observe(hc.Transport)
+		gh := githubrest.New(hc, api, c.Token, github.APIVersion, meter, logger)
 		return conn, gh, nil
 	}
 }
