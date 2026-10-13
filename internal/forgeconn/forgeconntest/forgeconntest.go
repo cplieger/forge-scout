@@ -222,6 +222,13 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 func (s *Server) revalidate(w http.ResponseWriter, r *http.Request, rec *httptest.ResponseRecorder) {
 	h := w.Header()
 	maps.Copy(h, rec.Header())
+	// The type net/http would send, set explicitly so the replayed body is
+	// never served for a browser to sniff (CodeQL go/reflected-xss).
+	ct := rec.Header().Get("Content-Type")
+	if ct == "" {
+		ct = http.DetectContentType(rec.Body.Bytes())
+	}
+	h.Set("Content-Type", ct)
 	if rec.Code != http.StatusOK {
 		w.WriteHeader(rec.Code)
 		_, _ = w.Write(rec.Body.Bytes())
