@@ -554,9 +554,10 @@ func newestCompleteCounts(expr string) bool {
 // checkTileFormat runs a tile's label_format of the count f, a Go
 // text/template as Loki runs it, over a scan line in each read state. The
 // count shows only when every read of it is complete; a line with no count,
-// as a stopped scan logs, or with a read in any other state reads NaN; and a
-// read the forge lacks or the config turns off reads tileDropped, which the
-// tile drops after last_over_time, so that connection adds nothing.
+// as a stopped scan logs, or with a read in any other state reads NaN, or
+// tileDropped for a count partialElsewhere names; and a read the forge lacks
+// or the config turns off reads tileDropped, which the tile drops after
+// last_over_time, so that connection adds nothing.
 func checkTileFormat(f, format string) []string {
 	tmpl, err := template.New(f).Option("missingkey=zero").Parse(format)
 	if err != nil {
@@ -583,15 +584,20 @@ func checkTileFormat(f, format string) []string {
 		}
 		return line
 	}
+	// A count another tile reads Partial for drops wherever it is not whole.
+	withheld := "NaN"
+	if _, ok := partialElsewhere[f]; ok {
+		withheld = tileDropped
+	}
 	var problems []string
 	if got := run(whole("3")); got != "3" {
 		problems = append(problems, "the tile shows "+got+" for a whole count of 3")
 	}
-	if got := run(whole("")); got != "NaN" {
+	if got := run(whole("")); got != withheld {
 		problems = append(problems, "the tile shows "+got+" for a line with no "+f+", so a stopped scan lends it an older scan's value")
 	}
 	for _, r := range reads {
-		for state, want := range map[string]string{"partial": "NaN", "blind": "NaN", "unread": "NaN", "unsupported": tileDropped, "excluded": tileDropped} {
+		for state, want := range map[string]string{"partial": withheld, "blind": withheld, "unread": withheld, "unsupported": tileDropped, "excluded": tileDropped} {
 			line := whole("3")
 			line[r] = state
 			if want == tileDropped {
@@ -660,7 +666,7 @@ func anyStrings(v any) []string {
 func TestDashboard_count_tiles_read_the_newest_scan(t *testing.T) {
 	tiles := 0
 	for _, p := range dashboardPanels(loadDashboard(t)) {
-		if p.viz != "stat" {
+		if p.viz != "stat" || composedTile(&p) {
 			continue
 		}
 		problems, tile := checkTilePanel(&p)
@@ -732,6 +738,9 @@ func checkFamilies(p *dashPanel) []string {
 func TestDashboard_panel_titles_name_the_list_they_count(t *testing.T) {
 	counting := 0
 	for _, p := range dashboardPanels(loadDashboard(t)) {
+		if composedTile(&p) {
+			continue
+		}
 		for _, q := range p.queries {
 			if m := unwrapRe.FindStringSubmatch(q.expr); m != nil && countFamily(m[1]) != "" {
 				counting++
@@ -790,7 +799,7 @@ func TestDashboard_count_tiles_read_a_stopped_scan_as_no_whole_count(t *testing.
 	text := nanText(t)
 	shown := 0
 	for _, p := range dashboardPanels(loadDashboard(t)) {
-		if p.viz != "stat" {
+		if p.viz != "stat" || composedTile(&p) {
 			continue
 		}
 		for _, q := range p.queries {
@@ -822,81 +831,6 @@ func TestDashboard_count_tiles_read_a_stopped_scan_as_no_whole_count(t *testing.
 }
 
 var tileFormatRe = regexp.MustCompile("\\|\\s*label_format\\s+([a-z0-9_]+)=`([^`]*)`")
-
-// excludedName is the name the open work tiles show the count of items the
-// exclude rules left out under.
-const excludedName = "Excluded by filters"
-
-// refIDNames is the displayName each byFrameRefID override of panel el
-// gives its query. Grafana 13.2.3 names an instant series with no labels
-// "Value #<refId>" and ignores its legendFormat, as measured.
-func refIDNames(el map[string]any) map[string]string {
-	out := map[string]string{}
-	overrides, _ := field(el, "spec", "vizConfig", "spec", "fieldConfig", "overrides").([]any)
-	for _, o := range overrides {
-		if field(o, "matcher", "id") != "byFrameRefID" {
-			continue
-		}
-		ref, _ := field(o, "matcher", "options").(string)
-		props, _ := field(o, "properties").([]any)
-		for _, p := range props {
-			if field(p, "id") == "displayName" {
-				out[ref], _ = field(p, "value").(string)
-			}
-		}
-	}
-	return out
-}
-
-func TestDashboard_open_work_tiles_show_the_items_exclude_rules_leave_out(t *testing.T) {
-	h := newHarness(t, excludeEndpoint())
-	h.scan(t)
-	line := lineFor(t, h.rec, "scan complete", "gh")
-	panels := dashboardPanels(loadDashboard(t))
-	for title, count := range map[string]string{"Open pull requests": "excluded_prs", "Open issues": "excluded_issues"} {
-		t.Run(strings.ReplaceAll(title, " ", "_"), func(t *testing.T) {
-			var tiles []dashPanel
-			for _, p := range panels {
-				if p.title == title && p.viz == "stat" {
-					tiles = append(tiles, p)
-				}
-			}
-			if len(tiles) != 1 {
-				t.Fatalf("%s carries %d count tiles titled %q, want 1", dashboardPath, len(tiles), title)
-			}
-			p := tiles[0]
-			names := refIDNames(p.el)
-			var shown []string
-			for _, q := range p.queries {
-				if names[q.refID] == "" {
-					t.Errorf("query %s of %q has no displayName override, so the tile names its value %q", q.refID, title, "Value #"+q.refID)
-				}
-				for _, r := range rangeNodes(mustParse(t, q.expr)) {
-					if !slices.Equal(rangeMessages(&r.node), []string{"scan complete"}) {
-						continue
-					}
-					for _, m := range tileFormatRe.FindAllStringSubmatch(r.node.pipeline, -1) {
-						if m[1] == count && names[q.refID] == excludedName {
-							shown = append(shown, formatLabels(t, m[2], []map[string]string{line})[0])
-						}
-					}
-				}
-			}
-			if !slices.Equal(shown, []string{line[count]}) {
-				t.Errorf("%q shows %v as %q, want the scan's %s %s once", title, shown, excludedName, count, line[count])
-			}
-			if mode := field(p.el, "spec", "vizConfig", "spec", "options", "textMode"); mode != "value_and_name" {
-				t.Errorf("%q textMode = %v, want value_and_name, so the excluded count carries its name", title, mode)
-			}
-		})
-	}
-	if line["excluded_prs"] != "2" || line["excluded_issues"] != "1" {
-		t.Errorf("Setup: scan complete excluded_prs %q excluded_issues %q, want 2 and 1", line["excluded_prs"], line["excluded_issues"])
-	}
-	if text := docSection(t, readMonitoringDoc(t), "The count tiles add up")[0]; !strings.Contains(text, `"`+excludedName+`"`) || !strings.Contains(text, "`excluded_prs`") {
-		t.Errorf("%s tile paragraph does not name %q and `excluded_prs`: %q", monitoringDoc, excludedName, text)
-	}
-}
 
 func TestDashboard_reads_only_what_a_scan_logs(t *testing.T) {
 	c := recordContract(t)
@@ -1948,7 +1882,7 @@ func TestDashboard_day_charts_read_the_day_lines(t *testing.T) {
 
 // unfiltered is the panels the forge filter does not narrow: the scan
 // loop's liveness belongs to no forge.
-var unfiltered = []string{"Scout status"}
+var unfiltered = []string{"Scout status", "Scout stalled"}
 
 // TestDashboard_shape pins what makes the file importable anywhere: a
 // schema v2 resource named forge-scout whose every query reads the

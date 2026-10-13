@@ -491,6 +491,27 @@ func TestScan_security_switched_off_reads_excluded_and_complete(t *testing.T) {
 	}
 }
 
+func TestScan_a_gitlab_connection_sends_no_code_scanning_or_workflow_read(t *testing.T) {
+	ep := gitlabEndpoint("gl")
+	// A GitHub reader beside the GitLab connection: only the product keeps
+	// its reads unsent.
+	ep.conn.quota = newFakeQuota(func() time.Time { return now }, 4000, now.Add(time.Hour))
+	ep.gh = &fakeGitHub{conn: ep.conn, alerts: map[string][]forge.Alert{"o/r": {{Repo: "o/r", Number: 1, SecuritySeverity: "critical", Source: "code_scanning"}}}}
+	h := newHarness(t, ep)
+	if got := h.scan(t); got != Complete {
+		t.Errorf("Scan of a GitLab connection = %s, want complete; messages %v", got, h.rec.Messages())
+	}
+	if ep.gh.calls != 0 || len(ep.gh.alertCalls) != 0 || len(ep.gh.workflowCalls) != 0 {
+		t.Errorf("GitHub reads sent: %d, alerts %v, workflows %v, want none", ep.gh.calls, ep.gh.alertCalls, ep.gh.workflowCalls)
+	}
+	l := lineFor(t, h.rec, "scan complete", "gl")
+	if l["degraded"] != "false" || l["security_alerts_read"] != "unsupported" || l["disabled_workflows_read"] != "unsupported" {
+		t.Errorf("scan complete degraded %q security_alerts_read %q disabled_workflows_read %q, want false, unsupported and unsupported",
+			l["degraded"], l["security_alerts_read"], l["disabled_workflows_read"])
+	}
+	noLineFor(t, h.rec, "scan degraded", "gl")
+}
+
 func TestScan_a_limit_reached_after_the_last_read_is_still_a_stop(t *testing.T) {
 	ep := giteaEndpoint("gt")
 	ep.conn.block = func(ctx context.Context, call string) error {

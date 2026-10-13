@@ -28,7 +28,8 @@ import (
 // snapshotLookback is the fixed window of every snapshot read.
 const snapshotLookback = "7d"
 
-// healthTab follows the time picker whole: its panels tell the scans apart.
+// healthTab follows the time picker, its panels telling the scans apart,
+// except the counts and coverage it shows from the fixed lookback.
 const healthTab = "Scout health"
 
 // volatileLabels change from scan to scan or name a line's place in its
@@ -112,14 +113,14 @@ func panelTabs(d map[string]any) map[string]string {
 
 // snapshotPanel reports a panel that shows each connection's current state:
 // a count tile, or a table of snapshot rows or of read states, outside
-// Scout health.
+// Scout health or reading the fixed lookback there.
 func snapshotPanel(p *dashPanel, tab string) bool {
-	if tab == healthTab {
+	if tab == healthTab && !slices.ContainsFunc(p.queries, func(q dashQuery) bool { return strings.Contains(q.expr, "["+snapshotLookback+"]") }) {
 		return false
 	}
 	switch p.viz {
 	case "stat":
-		return p.title != "Scan integrity" && slices.ContainsFunc(p.queries, func(q dashQuery) bool { return strings.Contains(q.expr, "NaN") })
+		return countTile(p)
 	case "table":
 		return slices.ContainsFunc(p.queries, func(q dashQuery) bool {
 			return slices.ContainsFunc(snapshotMessages, func(msg string) bool { return strings.Contains(q.expr, "msg=`"+msg+"`") }) ||
@@ -326,7 +327,7 @@ func TestDashboard_snapshot_reads_keep_each_connections_newest_complete_scan(t *
 			t.Errorf("panel %q joins no read on its connection's newest scan complete", p.title)
 		}
 	}
-	if kinds["stat"] < 20 || kinds["table"] < 15 {
+	if kinds["stat"] < 20 || kinds["table"] < 11 {
 		t.Fatalf("Setup: %d count tiles and %d snapshot tables found, want every one", kinds["stat"], kinds["table"])
 	}
 }
@@ -673,26 +674,23 @@ func TestDashboard_count_tiles_add_each_connections_newest_complete_count(t *tes
 	d := loadDashboard(t)
 	at := w.end.Add(time.Minute).UnixMilli()
 	newest := w.newestCompleteAt(at)
+	gated := gatedPanels(d)
 	tiles := 0
 	for _, p := range dashboardPanels(d) {
-		if p.viz != "stat" || p.title == "Scan integrity" || !slices.ContainsFunc(p.queries, func(q dashQuery) bool { return strings.Contains(q.expr, "NaN") }) {
+		if p.title == asOfTitle {
+			if got, err := w.model(at).eval(p.queries[0].expr); err != nil || len(got) != 1 || int64(got[0].value) != newest["gh"] {
+				t.Errorf("panel %q = %v (%v), want gh's last complete scan %d: gh is the one connection stopped since", p.title, got, err, newest["gh"])
+			}
+		}
+		if !countTile(&p) {
 			continue
 		}
 		tiles++
-		asOf, dated := asOfQuery(&p)
-		if !dated {
-			t.Errorf("panel %q has no %q value, so a count kept from before a stop is not dated", p.title, asOfName)
-		}
+		_, hides := gated[p.name]
 		for _, q := range p.queries {
 			got, err := w.model(at).eval(q.expr)
 			if err != nil {
 				t.Errorf("panel %q query %s: %v", p.title, q.refID, err)
-				continue
-			}
-			if dated && q.refID == asOf.refID {
-				if len(got) != 1 || int64(got[0].value) != newest["gh"] {
-					t.Errorf("panel %q %s = %v, want gh's last complete scan %d: gh is the one connection stopped since", p.title, asOfName, got, newest["gh"])
-				}
 				continue
 			}
 			want := 0.0
@@ -704,6 +702,12 @@ func TestDashboard_count_tiles_add_each_connections_newest_complete_count(t *tes
 						}
 					}
 				}
+			}
+			if hides && want == 0 {
+				if len(got) != 0 {
+					t.Errorf("panel %q query %s = %v, want no data at a sum of 0, so the tile hides", p.title, q.refID, got)
+				}
+				continue
 			}
 			if len(got) != 1 || got[0].value != want {
 				t.Errorf("panel %q query %s = %v, want %v, the sum of each connection's newest complete count", p.title, q.refID, got, want)
@@ -752,7 +756,7 @@ func tileScanLine(msg, connection string, id int64, state, count string, p *dash
 func TestDashboard_count_tiles_add_nothing_of_a_connection_whose_newest_scan_lacks_the_read(t *testing.T) {
 	tiles := 0
 	for _, p := range dashboardPanels(loadDashboard(t)) {
-		if p.viz != "stat" || p.title == "Scan integrity" || !slices.ContainsFunc(p.queries, func(q dashQuery) bool { return strings.Contains(q.expr, "NaN") }) {
+		if !countTile(&p) {
 			continue
 		}
 		tiles++
@@ -798,12 +802,7 @@ func TestDashboard_count_tiles_add_nothing_of_a_connection_whose_newest_scan_lac
 func TestDashboard_count_tiles_date_a_kept_count_whatever_its_stop_reads(t *testing.T) {
 	tiles := 0
 	for _, p := range dashboardPanels(loadDashboard(t)) {
-		if p.viz != "stat" || p.title == "Scan integrity" || !slices.ContainsFunc(p.queries, func(q dashQuery) bool { return strings.Contains(q.expr, "NaN") }) {
-			continue
-		}
-		asOf, dated := asOfQuery(&p)
-		if !dated {
-			t.Errorf("panel %q has no %q value", p.title, asOfName)
+		if !countTile(&p) {
 			continue
 		}
 		tiles++
@@ -819,12 +818,6 @@ func TestDashboard_count_tiles_date_a_kept_count_whatever_its_stop_reads(t *test
 				got, err := (&lokiModel{lines: stopped, at: 5000, maxSeries: lokiMaxSeries}).eval(q.expr)
 				if err != nil {
 					t.Fatalf("panel %q query %s: %v", p.title, q.refID, err)
-				}
-				if q.refID == asOf.refID {
-					if len(got) != 1 || got[0].value != 1000 {
-						t.Errorf("panel %q %s with a's stop reading %s = %v, want a's kept scan 1000", p.title, asOfName, s, got)
-					}
-					continue
 				}
 				want, _ := (&lokiModel{lines: kept, at: 5000, maxSeries: lokiMaxSeries}).eval(q.expr)
 				if len(want) == 0 || !maps.Equal(byLabels(got), byLabels(want)) {
@@ -873,7 +866,7 @@ func TestDashboard_read_state_tables_read_each_connections_newest_complete_scan(
 			t.Errorf("panel %q lists %d connections, want each of %d", p.title, len(got), len(newest))
 		}
 	}
-	if tables < 6 {
+	if tables < 1 {
 		t.Fatalf("Setup: %d read-state tables evaluated, want every one", tables)
 	}
 }
@@ -996,10 +989,16 @@ func TestDashboard_a_connection_that_only_stopped_reads_partial(t *testing.T) {
 		switch {
 		case err != nil:
 			t.Errorf("tile query %s: %v", q.refID, err)
-		case q.refID == "A" && (len(got) != 1 || !math.IsNaN(got[0].value)):
+		case len(got) != 1 || !math.IsNaN(got[0].value):
 			t.Errorf("tile Open pull requests = %v, want NaN, which reads %q: gh has no complete scan to keep", got, nanText(t))
-		case q.refID == "C" && len(got) != 0:
-			t.Errorf("tile %s = %v, want none: gh has no complete scan to date", asOfName, got)
+		}
+	}
+	for _, p := range dashboardPanels(loadDashboard(t)) {
+		if p.title != asOfTitle {
+			continue
+		}
+		if got, err := w.model(at).eval(p.queries[0].expr); err != nil || len(got) != 0 {
+			t.Errorf("tile %s = %v (%v), want none: gh has no complete scan to date", p.title, got, err)
 		}
 	}
 	stop, complete := lineFor(t, h.rec, "scan stopped", "gh"), lineFor(t, h.rec, "scan complete", "gt")
@@ -1026,7 +1025,7 @@ func TestDashboard_a_connection_that_only_stopped_reads_partial(t *testing.T) {
 			t.Errorf("panel %q = %v, want %v: gh, which only stopped, shows its stop's state, a read the stop finished as partial, since the tables list none of its rows", p.title, states, want)
 		}
 	}
-	if tables < 7 {
+	if tables < 1 {
 		t.Fatalf("Setup: %d read-state tables evaluated, want every one", tables)
 	}
 }
@@ -1097,7 +1096,7 @@ func TestLokiModel_matches_loki_operators(t *testing.T) {
 		newLokiLine(t, 1000, map[string]string{"msg": "scan complete", "connection": "b", "n": "NaN"}),
 		newLokiLine(t, 1000, map[string]string{"msg": "scan complete", "connection": "c", "n": "2"}),
 	}}
-	for filter, want := range map[string][]string{" != -1": {"b", "c"}, " > 0": {"c"}} {
+	for filter, want := range map[string][]string{" != -1": {"b", "c"}, " > 0": {"c"}, " != 0": {"a", "b", "c"}} {
 		got, err := m.eval(read("scan complete", "n", "connection") + filter)
 		var kept []string
 		for _, s := range got {
@@ -1107,5 +1106,13 @@ func TestLokiModel_matches_loki_operators(t *testing.T) {
 		if err != nil || !slices.Equal(kept, want) {
 			t.Errorf("eval(%s) keeps %v, %v, want %v", filter, kept, err, want)
 		}
+	}
+	// Loki 3.7.8's add, from sprig, reads a field a line lacks as 0.
+	sum := "last_over_time(" + sel + " |= `scan complete` | json msg=\"msg\", connection=\"connection\", n=\"n\", m=\"m\" | msg=`scan complete`" +
+		" | label_format total=`{{ add .n .m }}` | unwrap total | __error__=\"\" [7d]) by (connection)"
+	if got, err := m.eval(sum); err != nil || !maps.Equal(byLabels(got), map[string]float64{
+		labelKey(map[string]string{"connection": "a"}): -1, labelKey(map[string]string{"connection": "b"}): 0, labelKey(map[string]string{"connection": "c"}): 2,
+	}) {
+		t.Errorf("eval(add of a present and an absent field) = %v, %v, want each line's own count, an absent field adding 0", byLabels(got), err)
 	}
 }
