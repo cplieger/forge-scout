@@ -374,7 +374,7 @@ func splitTopLevel(s string, sep byte) []string {
 }
 
 // lokiTemplateFuncs are the label_format functions the dashboard uses beside
-// Go's own.
+// Go's own. __timestamp__ is the line's time, set per line by compileStage.
 var lokiTemplateFuncs = template.FuncMap{
 	"toDateInZone": func(layout, zone, v string) time.Time {
 		loc, err := time.LoadLocation(zone)
@@ -384,9 +384,45 @@ var lokiTemplateFuncs = template.FuncMap{
 		at, _ := time.ParseInLocation(layout, v, loc)
 		return at
 	},
-	"unixEpoch": func(at time.Time) int64 { return at.Unix() },
-	"replace":   func(old, repl, s string) string { return strings.ReplaceAll(s, old, repl) },
-	"mul":       func(a, b int64) int64 { return a * b },
+	"unixEpoch":     func(at time.Time) int64 { return at.Unix() },
+	"replace":       func(old, repl, s string) string { return strings.ReplaceAll(s, old, repl) },
+	"__timestamp__": func() time.Time { return time.Time{} },
+	"int":           func(v any) int { return int(toInt64(v)) },
+	"sub":           func(a, b any) int64 { return toInt64(a) - toInt64(b) },
+	"mul": func(a any, v ...any) int64 {
+		out := toInt64(a)
+		for _, b := range v {
+			out *= toInt64(b)
+		}
+		return out
+	},
+	"add": func(v ...any) int64 {
+		var out int64
+		for _, b := range v {
+			out += toInt64(b)
+		}
+		return out
+	},
+}
+
+// toInt64 converts as sprig's arithmetic does through cast.ToInt64: a
+// string that is no integer, such as an absent field's "", is 0.
+func toInt64(v any) int64 {
+	switch x := v.(type) {
+	case int:
+		return int64(x)
+	case int64:
+		return x
+	case float64:
+		return int64(x)
+	case string:
+		n, err := strconv.ParseInt(x, 0, 64)
+		if err != nil {
+			return 0
+		}
+		return n
+	}
+	return 0
 }
 
 // compiledStage is one pipeline stage, ready to run on a line's labels.
@@ -455,9 +491,11 @@ func compileStage(s string) (compiledStage, error) {
 			}
 			assigns = append(assigns, assign{name: m[1], tmpl: tmpl})
 		}
-		return compiledStage{run: func(_ *lokiLine, labels map[string]string) bool {
+		return compiledStage{run: func(l *lokiLine, labels map[string]string) bool {
 			in := maps.Clone(labels)
+			at := time.UnixMilli(l.at).UTC()
 			for _, a := range assigns {
+				a.tmpl.Funcs(template.FuncMap{"__timestamp__": func() time.Time { return at }})
 				var b strings.Builder
 				if a.tmpl.Execute(&b, in) != nil {
 					return false
@@ -525,11 +563,15 @@ type lokiModel struct {
 	maxSeries   int
 }
 
-// prepare is expr as Grafana sends it: the forge filter's All matches
-// every forge, so it is left out, and each variable is substituted.
+// prepare is expr as Grafana sends it: without a forge in vars the forge
+// filter is All, which matches every forge, so it is left out, and each
+// variable is substituted, the end of the range being at.
 func (m *lokiModel) prepare(expr string) string {
-	expr = strings.ReplaceAll(expr, `| forge=~"$forge"`, "")
+	if _, ok := m.vars["forge"]; !ok {
+		expr = strings.ReplaceAll(expr, `| forge=~"$forge"`, "")
+	}
 	expr = strings.ReplaceAll(expr, "$__range", lokiDuration(m.rangeWindow))
+	expr = strings.ReplaceAll(expr, "${__to:date:seconds}", strconv.FormatInt(m.at/1000, 10))
 	for k, v := range m.vars {
 		expr = strings.ReplaceAll(expr, "$"+k, v)
 	}

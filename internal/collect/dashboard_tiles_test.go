@@ -12,22 +12,11 @@ import (
 	"github.com/cplieger/github-scout/internal/forge"
 )
 
-// asOfName is the name a count tile shows the time of a kept count under.
+// asOfName is the name an item table shows the time of a kept row under.
 const asOfName = "As of"
 
 // asOfUnit dates a kept count: the scan it comes from can be days old.
 const asOfUnit = "time:MMM D, HH:mm"
-
-// asOfQuery is the query of a count tile that dates a kept count.
-func asOfQuery(p *dashPanel) (dashQuery, bool) {
-	names := refIDNames(p.el)
-	for _, q := range p.queries {
-		if names[q.refID] == asOfName {
-			return q, true
-		}
-	}
-	return dashQuery{}, false
-}
 
 func TestDashboard_every_as_of_mark_carries_its_date(t *testing.T) {
 	marks := 0
@@ -61,24 +50,23 @@ func TestDashboard_every_as_of_mark_carries_its_date(t *testing.T) {
 		}
 	}
 	walk(field(loadDashboard(t), "spec", "elements"))
-	if marks < 30 {
-		t.Fatalf("Setup: %s has %d %s marks, want one on every count tile and item table", dashboardPath, marks, asOfName)
+	if marks < 8 {
+		t.Fatalf("Setup: %s has %d %s columns, want one on every item table", dashboardPath, marks, asOfName)
 	}
 }
 
-// statLayout models a stat value at 1280 px with Grafana's menu docked, its
-// narrowest common desktop layout: a grid column is 33.8 px, and Grafana
-// splits a tile's width evenly between its values, or stacks them in rows
-// of the tile's width, a name beside its value in a tile of three. A rune at
-// 28 px takes 14.8 px as a digit, a capital or a colon and 12 px otherwise,
-// measured on Partial (85 px) and 13:43 (74 px); a text near the bound needs
-// a render to prove it fits.
+// A stat value is modelled at its narrowest common width: a grid
+// column is 33.8 px at 1280 px with Grafana's menu docked, and an auto-grid
+// tile is at least its column width. A rune at 28 px takes 14.8 px as a
+// digit, a capital or a colon and 12 px otherwise, measured on Partial
+// (85 px) and 13:43 (74 px); a text near the bound needs a render to prove
+// it fits.
 const (
-	// nameGapPx is the gap between a value and its name beside it.
-	nameGapPx    = 8.0
 	gridColumnPx = 33.8
 	wideRunePx   = 14.8
 	narrowRunePx = 12.0
+	// titlePadPx is the title row's padding and its menu icon.
+	titlePadPx = 40.0
 )
 
 func textPx(s string, size float64) float64 {
@@ -112,45 +100,19 @@ func fitsValue(s string, size, boxPx float64, lines int) bool {
 	return n <= lines
 }
 
-// statRow is one value of a stat panel: its name and every text it can show
-// in its value's place.
-type statRow struct {
-	name  string
-	texts []string
-}
-
-// statRows is each query's value: a sample count, the panel's mapped texts,
-// its own override's texts, and for a dated time unit its widest date and
-// time. The panel's no-value text shows alone, in place of every row.
-func statRows(p *dashPanel) []statRow {
-	fc, _ := field(p.el, "spec", "vizConfig", "spec", "fieldConfig").(map[string]any)
-	dflt, _ := fc["defaults"].(map[string]any)
-	shared := append([]string{"000"}, mappedTexts(dflt["mappings"])...)
-	overrides, _ := fc["overrides"].([]any)
-	var rows []statRow
-	for _, q := range p.queries {
-		row := statRow{texts: slices.Clone(shared)}
-		for _, o := range overrides {
-			if ref, _ := field(o, "matcher", "options").(string); ref != q.refID {
-				continue
-			}
-			props, _ := field(o, "properties").([]any)
-			for _, pr := range props {
-				pm, _ := pr.(map[string]any)
-				switch v := pm["value"]; pm["id"] {
-				case "displayName":
-					row.name, _ = v.(string)
-				case "unit":
-					if v == asOfUnit {
-						row.texts = append(row.texts, "Sep 30, 00:00")
-					}
-				}
-			}
-			row.texts = append(row.texts, mappedTexts(o)...)
-		}
-		rows = append(rows, row)
+// statTexts is every text a stat panel can show in its value's place: a
+// sample count, its mapped texts, its no-value text, and for a dated time
+// unit its widest date and time.
+func statTexts(p *dashPanel) []string {
+	dflt := field(p.el, "spec", "vizConfig", "spec", "fieldConfig", "defaults")
+	texts := append([]string{"000"}, mappedTexts(field(dflt, "mappings"))...)
+	if noValue, _ := field(dflt, "noValue").(string); noValue != "" {
+		texts = append(texts, noValue)
 	}
-	return rows
+	if field(dflt, "unit") == asOfUnit {
+		texts = append(texts, "Sep 30, 00:00")
+	}
+	return append(texts, mappedTexts(field(p.el, "spec", "vizConfig", "spec", "fieldConfig", "overrides"))...)
 }
 
 // mappedTexts is every no value and mapped text under v.
@@ -176,78 +138,89 @@ func mappedTexts(v any) []string {
 	return texts
 }
 
-// layoutWidths is each element's width in grid columns.
-func layoutWidths(d map[string]any) map[string]float64 {
+// tileWidths is each placed element's narrowest width in px: a grid item's
+// columns, or an auto grid's custom column width, 0 where neither is set.
+func tileWidths(d map[string]any) map[string]float64 {
 	out := map[string]float64{}
-	var walk func(v any)
-	walk = func(v any) {
+	var walk func(v any, auto float64)
+	walk = func(v any, auto float64) {
 		switch x := v.(type) {
 		case map[string]any:
-			if x["kind"] == "GridLayoutItem" {
+			switch x["kind"] {
+			case "AutoGridLayout":
+				auto = 0
+				if field(x, "spec", "columnWidthMode") == "custom" {
+					auto, _ = field(x, "spec", "columnWidth").(float64)
+				}
+			case "GridLayoutItem":
 				name, _ := field(x, "spec", "element", "name").(string)
-				out[name], _ = field(x, "spec", "width").(float64)
+				cols, _ := field(x, "spec", "width").(float64)
+				out[name] = cols * gridColumnPx
+			case "AutoGridLayoutItem":
+				name, _ := field(x, "spec", "element", "name").(string)
+				out[name] = auto
 			}
 			for _, y := range x {
-				walk(y)
+				walk(y, auto)
 			}
 		case []any:
 			for _, y := range x {
-				walk(y)
+				walk(y, auto)
 			}
 		}
 	}
-	walk(field(d, "spec", "layout"))
+	walk(field(d, "spec", "layout"), 0)
 	return out
 }
 
-// checkStatTexts reports every text of p that overflows its value box in a
-// tile cols columns wide.
-func checkStatTexts(p *dashPanel, cols float64) []string {
+// checkStatTexts reports every text of p that overflows a tile tilePx wide:
+// its title on one line, its value on two.
+func checkStatTexts(p *dashPanel, tilePx float64) []string {
 	opts := field(p.el, "spec", "vizConfig", "spec", "options")
 	size, _ := field(opts, "text", "valueSize").(float64)
 	titleSize, _ := field(opts, "text", "titleSize").(float64)
-	stacked := field(opts, "orientation") == "horizontal"
-	tile := cols*gridColumnPx - 4
+	box := tilePx - 4
 	var problems []string
-	if noValue, _ := field(p.el, "spec", "vizConfig", "spec", "fieldConfig", "defaults", "noValue").(string); noValue != "" && !fitsValue(noValue, size, tile, 2) {
-		problems = append(problems, "the no-value text "+strconv.Quote(noValue)+" overflows the tile")
+	if textPx(p.title, titleSize) > tilePx-titlePadPx {
+		problems = append(problems, "the title overflows the tile")
 	}
-	rows := statRows(p)
-	for _, row := range rows {
-		box, lines := tile/float64(len(rows)), 1
-		switch {
-		case stacked && len(rows) >= 3:
-			box = tile - textPx(row.name, titleSize) - nameGapPx
-		case stacked:
-			box = tile
-		}
-		if len(rows) == 1 {
-			lines = 2
-		}
-		for _, s := range row.texts {
-			if !fitsValue(s, size, box, lines) {
-				problems = append(problems, strconv.Quote(s)+" overflows its "+strconv.Itoa(int(box))+" px box")
-			}
+	for _, s := range statTexts(p) {
+		if !fitsValue(s, size, box, 2) {
+			problems = append(problems, strconv.Quote(s)+" overflows its "+strconv.Itoa(int(box))+" px box")
 		}
 	}
 	return problems
 }
 
+// tileColumnPx is the column width of every auto grid of tiles: it fits
+// the longest title and value at the standard sizes.
+const tileColumnPx = 300
+
 func TestDashboard_stat_texts_fit_their_value_box(t *testing.T) {
 	d := loadDashboard(t)
-	widths := layoutWidths(d)
+	widths := tileWidths(d)
 	checked := 0
 	for _, p := range dashboardPanels(d) {
 		if p.viz != "stat" {
 			continue
 		}
 		checked++
+		if widths[p.name] == 0 {
+			t.Errorf("panel %q sits in an auto grid with no custom column width, so its width is unknown", p.title)
+			continue
+		}
 		for _, problem := range checkStatTexts(&p, widths[p.name]) {
-			t.Errorf("panel %q at %v columns: %s at 1280 px", p.title, widths[p.name], problem)
+			t.Errorf("panel %q at %v px: %s", p.title, widths[p.name], problem)
 		}
 	}
 	if checked == 0 {
 		t.Fatalf("Setup: %s has no stat panel", dashboardPath)
+	}
+	gated := gatedPanels(d)
+	for name := range gated {
+		if w := widths[name]; field(d, "spec", "elements", name, "spec", "vizConfig", "group") == "stat" && w != tileColumnPx {
+			t.Errorf("tile %s sits in a %v px column, want %d px, the width the fit is checked at", name, w, tileColumnPx)
+		}
 	}
 	for name, tc := range map[string]struct {
 		s     string
@@ -259,8 +232,8 @@ func TestDashboard_stat_texts_fit_their_value_box(t *testing.T) {
 		"the old tile text in half a tile": {"No whole count in the newest scan", 28, 131, 1, false},
 		"a time in half a 4-column tile":   {"13:43", 28, 63, 1, false},
 		"a dated time in a 4-column tile":  {"Oct 12, 02:30", 28, 131, 1, false},
-		"a dated time in an 8-column tile": {"Oct 12, 02:30", 28, 266, 1, true},
-		"a stop wrapped onto two lines":    {"Stopped: API budget", 28, 266, 2, true},
+		"a dated time in a 300 px tile":    {"Oct 12, 02:30", 28, 296, 1, true},
+		"a stop wrapped onto two lines":    {"Stopped: API budget", 28, 296, 2, true},
 		"partial in a third of a tile":     {"Partial", 28, 88, 1, true},
 	} {
 		if got := fitsValue(tc.s, tc.size, tc.box, tc.lines); got != tc.want {
@@ -274,72 +247,15 @@ func TestDashboard_stat_values_keep_their_font_size(t *testing.T) {
 		if p.viz != "stat" {
 			continue
 		}
-		if size := field(p.el, "spec", "vizConfig", "spec", "options", "text", "valueSize"); size != 28.0 {
-			t.Errorf("panel %q value size = %v, want 28: a mark fits by layout, never a smaller count", p.title, size)
+		text := field(p.el, "spec", "vizConfig", "spec", "options", "text")
+		if field(text, "valueSize") != 28.0 || field(text, "titleSize") != 14.0 {
+			t.Errorf("panel %q text = %v, want titleSize 14 and valueSize 28: a value fits by layout, never a smaller font", p.title, text)
 		}
 	}
 }
 
-func TestDashboard_open_work_count_tiles_stack_counted_excluded_and_as_of(t *testing.T) {
-	for _, title := range []string{"Open pull requests", "Open issues"} {
-		p := panelOfViz(t, title, "stat")
-		opts := field(p.el, "spec", "vizConfig", "spec", "options")
-		var names []string
-		for _, q := range p.queries {
-			names = append(names, refIDNames(p.el)[q.refID])
-		}
-		if field(opts, "orientation") != "horizontal" || field(opts, "textMode") != "value_and_name" || !slices.Equal(names, []string{"Counted", excludedName, asOfName}) {
-			t.Errorf("tile %q orientation %v, text mode %v, values %v, want stacked rows Counted, %s and %s", title, field(opts, "orientation"), field(opts, "textMode"), names, excludedName, asOfName)
-		}
-	}
-}
-
-func TestDashboard_severity_tiles_sit_three_to_a_row(t *testing.T) {
-	d := loadDashboard(t)
-	var items []map[string]any
-	var walk func(v any)
-	walk = func(v any) {
-		switch x := v.(type) {
-		case map[string]any:
-			if x["kind"] == "RowsLayoutRow" && field(x, "spec", "title") == "Open alerts by severity" {
-				list, _ := field(x, "spec", "layout", "spec", "items").([]any)
-				for _, it := range list {
-					m, _ := it.(map[string]any)
-					items = append(items, m)
-				}
-				return
-			}
-			for _, y := range x {
-				walk(y)
-			}
-		case []any:
-			for _, y := range x {
-				walk(y)
-			}
-		}
-	}
-	walk(field(d, "spec", "layout"))
-	if len(items) < 6 {
-		t.Fatalf("Setup: the severity row holds %d tiles, want at least 6", len(items))
-	}
-	rows := map[float64]int{}
-	for _, it := range items {
-		x, _ := field(it, "spec", "x").(float64)
-		y, _ := field(it, "spec", "y").(float64)
-		if w := field(it, "spec", "width"); w != 8.0 || int(x)%8 != 0 || field(it, "spec", "height") != 4.0 {
-			t.Errorf("severity tile %v is %v wide at x %v, want 8 columns on a third of the row", field(it, "spec", "element", "name"), w, x)
-		}
-		rows[y]++
-	}
-	for y, n := range rows {
-		if n != 3 {
-			t.Errorf("severity row at y %v holds %d tiles, want 3", y, n)
-		}
-	}
-}
-
-// integrityTexts is the Scan integrity text of each per-connection verdict.
-func integrityTexts(p *dashPanel) map[string]string {
+// valueTexts is the text p's value mappings draw for each value.
+func valueTexts(p *dashPanel) map[string]string {
 	out := map[string]string{}
 	mappings, _ := field(p.el, "spec", "vizConfig", "spec", "fieldConfig", "defaults", "mappings").([]any)
 	for _, m := range mappings {
@@ -353,30 +269,35 @@ func integrityTexts(p *dashPanel) map[string]string {
 
 func TestDashboard_scan_integrity_reads_a_budget_stop_as_stopped(t *testing.T) {
 	p := panelTitled(t, dashboardPanels(loadDashboard(t)), "Scan integrity")
-	expr := p.queries[0].expr
-	f := tileFormatRe.FindStringSubmatch(expr)
-	if f == nil || !strings.HasPrefix(expr, "max(") {
-		t.Fatalf("Scan integrity = %s, want the worst of each connection's newest verdict", expr)
-	}
-	texts := integrityTexts(&p)
+	texts := valueTexts(&p)
 	for name, tc := range map[string]struct {
 		line map[string]string
 		want string
 	}{
-		"complete":    {map[string]string{"msg": "scan complete", "degraded": "false"}, "Complete"},
+		"complete":    {map[string]string{"msg": "scan complete", "degraded": "false"}, ""},
 		"degraded":    {map[string]string{"msg": "scan complete", "degraded": "true"}, "Degraded"},
 		"budget stop": {map[string]string{"msg": "scan stopped", "degraded": "false", "reason": stopReadReserve}, "Stopped: API budget"},
 		"other stop":  {map[string]string{"msg": "scan stopped", "degraded": "true", "reason": stopRateLimited}, "Degraded"},
 	} {
 		t.Run(strings.ReplaceAll(name, " ", "_"), func(t *testing.T) {
-			v := formatLabels(t, f[2], []map[string]string{tc.line})[0]
-			if texts[v] != tc.want {
-				t.Errorf("Scan integrity reads %q (%s) for a %s, want %q", texts[v], v, name, tc.want)
+			line := maps.Clone(tc.line)
+			line["connection"] = "gh"
+			m := &lokiModel{lines: []lokiLine{newLokiLine(t, 1000, line)}, at: 5000, rangeWindow: time.Hour, maxSeries: lokiMaxSeries}
+			got, err := m.eval(p.queries[0].expr)
+			if err != nil {
+				t.Fatalf("Scan integrity: %v", err)
+			}
+			shown := ""
+			if len(got) == 1 {
+				shown = texts[strconv.FormatFloat(got[0].value, 'f', -1, 64)]
+			}
+			if len(got) > 1 || shown != tc.want {
+				t.Errorf("Scan integrity shows %q (%v) for a %s, want %q, nothing for a whole scan", shown, got, name, tc.want)
 			}
 		})
 	}
-	if worst := []string{"Complete", "Stopped: API budget", "Degraded"}; !slices.Equal([]string{texts["0"], texts["1"], texts["2"]}, worst) {
-		t.Errorf("Scan integrity verdicts 0, 1, 2 read %q %q %q, want %v in rising order, so max shows the worst", texts["0"], texts["1"], texts["2"], worst)
+	if worst := []string{"Stopped: API budget", "Degraded"}; !slices.Equal([]string{texts["1"], texts["2"]}, worst) {
+		t.Errorf("Scan integrity verdicts 1, 2 read %q %q, want %v in rising order, so max shows the worst", texts["1"], texts["2"], worst)
 	}
 	raw := field(p.el, "spec", "vizConfig", "spec", "fieldConfig", "defaults", "thresholds", "steps")
 	steps, _ := raw.([]any)
@@ -386,7 +307,7 @@ func TestDashboard_scan_integrity_reads_a_budget_stop_as_stopped(t *testing.T) {
 			colors[v], _ = field(s, "color").(string)
 		}
 	}
-	if want := map[float64]string{0: "green", 1: "orange", 2: "red"}; !maps.Equal(colors, want) {
+	if want := map[float64]string{1: "orange", 2: "red"}; !maps.Equal(colors, want) {
 		t.Errorf("Scan integrity colors %v, want %v: a budget stop in amber", colors, want)
 	}
 }

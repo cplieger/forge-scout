@@ -71,7 +71,7 @@ connections:
         draft: true
 ```
 
-forge-scout leaves an excluded item out before it ranks, counts or lists anything, and sends no checks read for an excluded pull request. `scan complete` counts the items left out as `excluded_prs` and `excluded_issues`, the Overview's Open pull requests and Open issues tiles show them as Excluded by filters, and an excluded item never makes a read `partial`. Logins and labels differ per forge and per setup, so check what your forge reports: at `log_level: debug`, an `excluded item` line names each item left out and the rule that matched it, such as `connections[1].exclude[2]`.
+forge-scout leaves an excluded item out before it ranks, counts or lists anything, and sends no checks read for an excluded pull request. `scan complete` counts the items left out as `excluded_prs` and `excluded_issues`, the PRs excluded by filters and Issues excluded by filters tiles on Scout health show them, and an excluded item never makes a read `partial`. Logins and labels differ per forge and per setup, so check what your forge reports: at `log_level: debug`, an `excluded item` line names each item left out and the rule that matched it, such as `connections[1].exclude[2]`.
 
 Each condition is matched as written, so spaces around a value are part of it. A rule that sets no condition, a condition written empty (such as `label:` with no value), an unknown condition, a `kind` other than `pull_request` or `issue`, a `title` that is not a valid expression, a `repo` that is not a full path such as `owner/name` with no leading, trailing or doubled `/`, or `draft` beside `kind: issue` stops the start with an error naming the rule.
 
