@@ -308,17 +308,36 @@ func TestScan_a_connection_stopped_at_the_reserve_resumes_once_its_window_renews
 	}
 }
 
-// TestScan_a_second_scan_is_answered_from_the_read_cache drives two scans
-// through the real adapters against a GitHub and a GitLab fake that send
-// validators: the second reuses each connection, every unchanged forgeapi
-// REST read is revalidated, and GitHub bills none of those while GitLab bills
-// each. The code-scanning and workflow reads are not cached.
+// sameDayClock is a scan clock set within two hours of now, and a time two
+// hours after it on the same UTC day.
+func sameDayClock() (clock *time.Time, later time.Time) {
+	at := time.Now().UTC()
+	if early := at.Add(-2 * time.Hour); early.Truncate(24 * time.Hour).Equal(at.Truncate(24 * time.Hour)) {
+		at = early
+	}
+	return &at, at.Add(2 * time.Hour)
+}
+
+// clockedCollector is newCollector reading the time from clock.
+func clockedCollector(t *testing.T, cfg *config.Config, clock *time.Time) *collect.Collector {
+	t.Helper()
+	c := collect.New(t.Context(), &collect.Deps{
+		Open: opener(slog.Default()), Store: testStore(t), Logger: slog.Default(), Now: func() time.Time { return *clock },
+		Connections: cfg.Connections, Lookback: cfg.Lookback, ScanInterval: cfg.ScanInterval, ScanLimit: config.ScanLimit(cfg.ScanInterval),
+	})
+	t.Cleanup(c.Close)
+	return c
+}
+
+// TestScan_a_second_scan_is_answered_from_the_read_cache drives two scans two
+// hours apart on one UTC day through the real adapters against a GitHub and
+// a GitLab fake that send validators: the second reuses each connection,
+// every unchanged REST read, GitHub's code-scanning and workflow reads
+// included, is revalidated, and GitHub bills none of those while GitLab bills
+// each.
 func TestScan_a_second_scan_is_answered_from_the_read_cache(t *testing.T) {
 	rec := capture.Default(t)
-	if left := time.Until(time.Now().Truncate(time.Hour).Add(time.Hour)); left < 10*time.Second {
-		// Both scans must ask one hour's run window.
-		time.Sleep(left + time.Second)
-	}
+	clock, later := sameDayClock()
 	w := world("acme")
 	w.Validators = true
 	gh := forgeconntest.New(forgeconntest.GitHub, w)
@@ -328,10 +347,12 @@ func TestScan_a_second_scan_is_answered_from_the_read_cache(t *testing.T) {
 	hub, lab := gh.Connection("hub"), gl.Connection("lab")
 	lab.Security = config.Security{}
 	cfg := config.Config{Lookback: 72 * time.Hour, ScanInterval: 15 * time.Minute, Connections: []config.Connection{hub, lab}}
-	c := newCollector(t.Context(), &cfg, slog.Default(), testStore(t))
-	t.Cleanup(c.Close)
+	c := clockedCollector(t, &cfg, clock)
 	scans := make([]map[string]map[string]int, 2)
 	for i := range scans {
+		if i == 1 {
+			*clock = later
+		}
 		from := rec.Len()
 		if got := c.Scan(t.Context()); got != collect.Complete {
 			t.Fatalf("scan %d = %s, want complete; messages %v", i+1, got, rec.Messages())
@@ -340,9 +361,9 @@ func TestScan_a_second_scan_is_answered_from_the_read_cache(t *testing.T) {
 	}
 	first, second := scans[0], scans[1]
 	t.Logf("first scan %v\nsecond scan %v", first, second)
-	if h, f := second["hub"], first["hub"]; h["cache_hits"] == 0 || h["cache_saved"] != h["cache_hits"] || h["requests_open"] != 0 || h["requests_runs"] != 0 ||
-		h["requests_workflows"] != f["requests_workflows"] || h["requests_code_scanning"] != f["requests_code_scanning"] {
-		t.Errorf("second GitHub scan = %v, first %v: want cache hits, every one saved, no billed open or run request, and the uncached workflow and code-scanning reads billed as before", h, f)
+	if h := second["hub"]; h["cache_hits"] == 0 || h["cache_saved"] != h["cache_hits"] || h["requests_open"] != 0 || h["requests_runs"] != 0 ||
+		h["requests_workflows"] != 0 || h["requests_code_scanning"] != 0 || h["requests_rest"] != 0 {
+		t.Errorf("second GitHub scan = %v: want cache hits, every one saved, and no billed REST request, the run, workflow and code-scanning reads included", h)
 	}
 	if h := first["hub"]; h["requests_runs"] == 0 || h["requests_workflows"] == 0 || h["requests_code_scanning"] == 0 || h["cache_hits"] != 0 {
 		t.Errorf("first GitHub scan = %v, want each REST read billed and no hit", h)
@@ -360,6 +381,80 @@ func TestScan_a_second_scan_is_answered_from_the_read_cache(t *testing.T) {
 		if accounts != 1 {
 			t.Errorf("connection %s read its account %d times over two scans, want once: the connection and its cache are kept", name, accounts)
 		}
+	}
+}
+
+// TestScan_runs_the_day_long_listing_returns_from_before_lookback_are_never_logged
+// drives two scans two hours apart through the real adapter against a GitHub
+// fake: the run listing asks for the runs from the start of the UTC day the
+// window starts on, so it returns runs created before the window, which no
+// line or count may hold, nor one that leaves the window between the scans.
+func TestScan_runs_the_day_long_listing_returns_from_before_lookback_are_never_logged(t *testing.T) {
+	rec := capture.Default(t)
+	day := time.Now().UTC().Truncate(24 * time.Hour).Add(-24 * time.Hour)
+	clock := day.Add(3 * time.Hour)
+	anchor := day.Add(-72 * time.Hour)
+	w := world("acme")
+	w.Repos[0].Alerts, w.Repos[0].Workflows = nil, nil
+	at := func(id int64, workflow, outcome string, created time.Time) forgeconntest.Run {
+		return forgeconntest.Run{
+			ID: id, Number: id, Workflow: workflow, Branch: "main", Event: "push", Outcome: outcome,
+			Created: created, Started: created.Add(time.Minute), Updated: created.Add(5 * time.Minute),
+		}
+	}
+	w.Repos[0].Runs = []forgeconntest.Run{
+		at(1, "early", "failure", anchor.Add(time.Hour)),
+		at(2, "ci", "success", anchor.Add(4*time.Hour)),
+		at(3, "ci", "success", clock.Add(-time.Hour)),
+	}
+	gh := forgeconntest.New(forgeconntest.GitHub, w)
+	t.Cleanup(gh.Close)
+	cfg := config.Config{Lookback: 72 * time.Hour, ScanInterval: 15 * time.Minute, Connections: []config.Connection{gh.Connection("hub")}}
+	c := clockedCollector(t, &cfg, &clock)
+	runLines := func(from int) []string {
+		var ids []string
+		for _, r := range rec.Records()[from:] {
+			if r.Message != "ci run" {
+				continue
+			}
+			r.Attrs(func(a slog.Attr) bool {
+				if a.Key == "run_id" {
+					ids = append(ids, a.Value.String())
+				}
+				return true
+			})
+		}
+		return ids
+	}
+	for i, tc := range []struct {
+		at      time.Time
+		runs    []string
+		tracked int
+	}{
+		{at: clock, runs: []string{"2", "3"}, tracked: 2},
+		{at: clock.Add(2 * time.Hour), tracked: 1},
+	} {
+		clock = tc.at
+		from := rec.Len()
+		if got := c.Scan(t.Context()); got != collect.Complete {
+			t.Fatalf("scan %d = %s, want complete; messages %v", i+1, got, rec.Messages())
+		}
+		if got := runLines(from); !slices.Equal(got, tc.runs) {
+			t.Errorf("scan %d at %s logged ci run lines for %v, want %v: run 1 is older than lookback, and run 2 too by the second scan",
+				i+1, clock.Format(time.RFC3339), got, tc.runs)
+		}
+		counts := completeCounts(rec.Records()[from:])["hub"]
+		if counts["tracked"] != tc.tracked || counts["failing_workflows"] != 0 {
+			t.Errorf("scan %d tracked %d runs and %d failing workflows, want %d and 0: run 1's failure is older than lookback",
+				i+1, counts["tracked"], counts["failing_workflows"], tc.tracked)
+		}
+	}
+	listed := false
+	for _, r := range gh.Requests() {
+		listed = listed || strings.Contains(r, "/actions/runs") && strings.Contains(r, "created=%3E%3D"+anchor.Format("2006-01-02")+"T00%3A00%3A00%2B00%3A00")
+	}
+	if !listed {
+		t.Errorf("requests %v, want the run listing asked from %s, the start of the UTC day lookback reaches", gh.Requests(), anchor.Format(time.RFC3339))
 	}
 }
 

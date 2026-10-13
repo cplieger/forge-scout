@@ -288,18 +288,19 @@ func (c *Client) RepoOpenIssues(ctx context.Context, repo forge.Repo) ([]forge.I
 }
 
 // RunsSince lists repo's runs created at or after since: the completed ones
-// in Rows and the ones in a state forgeapi could not map in Unmapped, with
-// the oldest creation time of any row and of a pending one. A listing cut
-// short ends EndCut. A
-// listing whose rows carry no creation time (Gitea before v28) is
-// forge.ErrRunsUndated.
+// in Rows, the ones in a state forgeapi could not map in Unmapped, and the
+// oldest creation time of any row and of a pending one. A listing cut short
+// ends EndCut; one whose rows carry no creation time (Gitea before
+// v28) is forge.ErrRunsUndated. It asks the forge from the start of since's
+// UTC day, so the request, and the read cache's entry for it, last all day.
 func (c *Client) RunsSince(ctx context.Context, repo forge.Repo, since time.Time) (forge.RunList, error) {
 	ref, err := repoRef(repo)
 	if err != nil {
 		return forge.RunList{}, err
 	}
+	day := since.UTC().Truncate(24 * time.Hour)
 	rows, w, err := walk(ctx, c, maxRunPages, func(ctx context.Context, after forgeapi.Cursor) (forgeapi.Page[forgeapi.Run], error) {
-		return c.api.ListRuns(ctx, ref, forgeapi.WithSince(since), forgeapi.WithAfter(after))
+		return c.api.ListRuns(ctx, ref, forgeapi.WithSince(day), forgeapi.WithAfter(after))
 	})
 	if err != nil {
 		if c.product == forge.ProductGitea && undated(err) {
@@ -310,22 +311,34 @@ func (c *Client) RunsSince(ctx context.Context, repo forge.Repo, since time.Time
 	if err := c.stopOnRateLimit(w); err != nil {
 		return forge.RunList{}, err
 	}
-	list := forge.RunList{Listing: forge.Listing[forge.Run]{Rows: make([]forge.Run, 0, len(rows)), End: w.end()}}
+	list := runListOf(rows, repo.Path, since)
+	list.End = w.end()
+	return list, nil
+}
+
+// runListOf sorts the rows of repo created at or after since into a run
+// list.
+func runListOf(rows []forgeapi.Run, repo string, since time.Time) (list forge.RunList) {
+	list.Rows = make([]forge.Run, 0, len(rows))
 	for i := range rows {
 		r := &rows[i]
+		// A row with no creation time stays, for the caller to refuse.
+		if !r.CreatedAt.IsZero() && r.CreatedAt.Before(since) {
+			continue
+		}
 		earliest(&list.Oldest, r.CreatedAt)
 		if r.State == forgeapi.CheckPending {
 			earliest(&list.OldestPending, r.CreatedAt)
 			continue
 		}
-		run, ok := runOf(r, repo.Path)
+		run, ok := runOf(r, repo)
 		if !ok {
-			list.Unmapped = append(list.Unmapped, unstated(r, repo.Path))
+			list.Unmapped = append(list.Unmapped, unstated(r, repo))
 			continue
 		}
 		list.Rows = append(list.Rows, run)
 	}
-	return list, nil
+	return list
 }
 
 // earliest moves *oldest back to t when t is set and older.

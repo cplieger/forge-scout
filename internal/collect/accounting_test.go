@@ -81,16 +81,18 @@ func TestScan_a_forge_without_graphql_logs_its_rest_requests(t *testing.T) {
 func TestScan_logs_what_the_read_cache_did_this_scan(t *testing.T) {
 	ep := readStateEndpoint()
 	ep.conn.cache = forge.ReadCache{Hits: 3, Misses: 4, Saved: 3}
+	ep.gh.cache = forge.ReadCache{Hits: 10, Misses: 20, Saved: 10}
 	h := newHarness(t, ep)
 	h.scan(t)
 	cacheFields := func() map[string]string {
 		c := lineFor(t, h.rec, "scan complete", "gh")
 		return map[string]string{"cache_hits": c["cache_hits"], "cache_misses": c["cache_misses"], "cache_saved": c["cache_saved"]}
 	}
-	checkFields(t, "first scan complete", cacheFields(), map[string]string{"cache_hits": "3", "cache_misses": "4", "cache_saved": "3"})
+	checkFields(t, "first scan complete, both clients' caches", cacheFields(), map[string]string{"cache_hits": "13", "cache_misses": "24", "cache_saved": "13"})
 	ep.conn.cache = forge.ReadCache{Hits: 7, Misses: 6, Saved: 7}
+	ep.gh.cache = forge.ReadCache{Hits: 15, Misses: 21, Saved: 15}
 	h.scan(t)
-	checkFields(t, "second scan complete", cacheFields(), map[string]string{"cache_hits": "4", "cache_misses": "2", "cache_saved": "4"})
+	checkFields(t, "second scan complete, both clients' caches", cacheFields(), map[string]string{"cache_hits": "9", "cache_misses": "3", "cache_saved": "9"})
 }
 
 func TestScan_reuses_each_connections_open_across_scans(t *testing.T) {
@@ -103,26 +105,6 @@ func TestScan_reuses_each_connections_open_across_scans(t *testing.T) {
 		if ep.opens != 1 || ep.conn.closed {
 			t.Errorf("connection %s over three scans: opened %d times, closed %t; want one open kept, so its read cache can answer the next scan",
 				ep.cfg.Name, ep.opens, ep.conn.closed)
-		}
-	}
-}
-
-func TestScan_anchors_the_run_window_to_the_hour(t *testing.T) {
-	ep := githubEndpoint("gh")
-	h := newHarness(t, ep)
-	for _, tc := range []struct {
-		at   time.Duration
-		want time.Time
-	}{
-		{at: 17*time.Minute + 42*time.Second, want: now.Add(-72 * time.Hour)},
-		{at: 47*time.Minute + 3*time.Second, want: now.Add(-72 * time.Hour)},
-		{at: 62 * time.Minute, want: now.Add(-71 * time.Hour)},
-	} {
-		*h.clock = now.Add(tc.at)
-		h.scan(t)
-		if got := ep.conn.since["o/r"]; !got.Equal(tc.want) {
-			t.Errorf("scan at %s listed runs since %s, want %s: the start of the hour the lookback reaches, so every scan of an hour asks the same URL",
-				stamp(*h.clock), stamp(got), stamp(tc.want))
 		}
 	}
 }

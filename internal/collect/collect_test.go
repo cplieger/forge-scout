@@ -303,11 +303,14 @@ type fakeGitHub struct {
 	block         func(ctx context.Context, call string) error
 	alertCalls    []string
 	workflowCalls []string
-	calls         int
+	// cache is the read cache's counts since the client was built.
+	cache forge.ReadCache
+	calls int
 }
 
-func (g *fakeGitHub) BeginScan()           { g.conn.quota.meter.BeginScan() }
-func (g *fakeGitHub) Budget() forge.Budget { return g.conn.quota.meter.Budget() }
+func (g *fakeGitHub) BeginScan()                 { g.conn.quota.meter.BeginScan() }
+func (g *fakeGitHub) Budget() forge.Budget       { return g.conn.quota.meter.Budget() }
+func (g *fakeGitHub) ReadCache() forge.ReadCache { return g.cache }
 
 // read sends one GitHub-only read answering the error errs keys by call,
 // reporting whether it was sent.

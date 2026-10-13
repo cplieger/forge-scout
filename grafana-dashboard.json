@@ -12170,7 +12170,7 @@
         "spec": {
           "id": 87,
           "title": "Read cache answers per hour",
-          "description": "Per hour, each connection's reads the cache answered unchanged, the reads it could hold that the forge answered in full, and the requests the unchanged answers saved. GitHub bills nothing for an unchanged answer, while GitLab bills it like any other, so there only the transfer is saved. Gitea and Forgejo send nothing the cache can check, so their reads are all answered in full, and GraphQL reads and GitHub's code-scanning and workflow reads are never cached. A restart empties the cache, so the first scan after one saves nothing.",
+          "description": "Per hour, each connection's reads the cache answered unchanged, the reads it could hold that the forge answered in full, and the requests the unchanged answers saved, GitHub's code-scanning and workflow reads included. GitHub bills nothing for an unchanged answer, while GitLab bills it like any other, so there only the transfer is saved. Gitea and Forgejo send nothing the cache can check, so their reads are all answered in full, and GraphQL reads are never cached. A restart empties the cache, so the first scan after one saves nothing.",
           "links": [],
           "data": {
             "kind": "QueryGroup",

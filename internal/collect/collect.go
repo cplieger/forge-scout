@@ -52,6 +52,8 @@ type GitHubReader interface {
 	Workflows(ctx context.Context, repo forge.Repo) (forge.Listing[forge.Workflow], error)
 	BeginScan()
 	Budget() forge.Budget
+	// ReadCache is what the reader's read cache did since it was built.
+	ReadCache() forge.ReadCache
 }
 
 // Opener opens a connection, sending every attempt of it and of the clients
@@ -237,12 +239,11 @@ func (c *Collector) Scan(ctx context.Context) Outcome {
 	return Complete
 }
 
-// runWindow is the start of the run listing's window: lookback before start,
-// moved back to the start of its hour. Every scan of an hour then asks the
-// same listing URL, which the read cache can revalidate, and the window only
-// grows.
+// runWindow is the start of the run listing's window, exactly lookback
+// before start: every count, listing cover and prune holds that span
+// (forgeconn.Client.RunsSince owns the request that keeps its URL stable).
 func runWindow(start time.Time, lookback time.Duration) time.Time {
-	return start.Add(-lookback).Truncate(time.Hour)
+	return start.Add(-lookback)
 }
 
 // accountGate holds the connections to one forge until each has opened, so
