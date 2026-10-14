@@ -15,12 +15,12 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/cplieger/forge-scout/internal/config"
+	"github.com/cplieger/forge-scout/internal/forge"
+	"github.com/cplieger/forge-scout/internal/ghquota"
+	"github.com/cplieger/forge-scout/internal/spend"
 	"github.com/cplieger/forgeapi"
 	"github.com/cplieger/forgeapi/families"
-	"github.com/cplieger/github-scout/internal/config"
-	"github.com/cplieger/github-scout/internal/forge"
-	"github.com/cplieger/github-scout/internal/ghquota"
-	"github.com/cplieger/github-scout/internal/spend"
 )
 
 // Walk ceilings, in pages: each list call reads one page. Reaching one with a

@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cplieger/forge-scout/internal/forge"
+	"github.com/cplieger/forge-scout/internal/forgeconn/forgeconntest"
+	"github.com/cplieger/forge-scout/internal/ghquota"
+	"github.com/cplieger/forge-scout/internal/spend"
 	"github.com/cplieger/forgeapi"
-	"github.com/cplieger/github-scout/internal/forge"
-	"github.com/cplieger/github-scout/internal/forgeconn/forgeconntest"
-	"github.com/cplieger/github-scout/internal/ghquota"
-	"github.com/cplieger/github-scout/internal/spend"
 )
 
 // openMetered opens a fake of product serving w with spent as the

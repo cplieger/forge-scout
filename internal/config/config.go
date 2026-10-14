@@ -28,8 +28,8 @@ import (
 
 	"github.com/cplieger/atomicfile/v4"
 	"github.com/cplieger/envx/yamlenv/v2"
+	"github.com/cplieger/forge-scout/internal/forge"
 	"github.com/cplieger/forgeapi"
-	"github.com/cplieger/github-scout/internal/forge"
 	"github.com/cplieger/slogx"
 	"go.yaml.in/yaml/v3"
 )

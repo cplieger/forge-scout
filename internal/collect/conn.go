@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cplieger/github-scout/internal/config"
-	"github.com/cplieger/github-scout/internal/forge"
-	"github.com/cplieger/github-scout/internal/runstate"
+	"github.com/cplieger/forge-scout/internal/config"
+	"github.com/cplieger/forge-scout/internal/forge"
+	"github.com/cplieger/forge-scout/internal/runstate"
 )
 
 // scan is what every connection of one scan shares.

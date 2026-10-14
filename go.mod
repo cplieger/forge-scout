@@ -1,4 +1,4 @@
-module github.com/cplieger/github-scout
+module github.com/cplieger/forge-scout
 
 go 1.27.2
 

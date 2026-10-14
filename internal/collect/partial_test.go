@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cplieger/github-scout/internal/forge"
+	"github.com/cplieger/forge-scout/internal/forge"
 )
 
 func TestScan_a_repository_whose_run_read_failed_publishes_no_workflow_rows(t *testing.T) {

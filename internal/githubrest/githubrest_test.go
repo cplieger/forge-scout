@@ -17,9 +17,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cplieger/github-scout/internal/forge"
-	"github.com/cplieger/github-scout/internal/ghquota"
-	"github.com/cplieger/github-scout/internal/spend"
+	"github.com/cplieger/forge-scout/internal/forge"
+	"github.com/cplieger/forge-scout/internal/ghquota"
+	"github.com/cplieger/forge-scout/internal/spend"
 	"github.com/cplieger/httpx/v5"
 	"github.com/cplieger/ssrf/v4"
 )

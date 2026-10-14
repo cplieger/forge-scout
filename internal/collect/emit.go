@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cplieger/github-scout/internal/forge"
-	"github.com/cplieger/github-scout/internal/runstate"
+	"github.com/cplieger/forge-scout/internal/forge"
+	"github.com/cplieger/forge-scout/internal/runstate"
 	"github.com/cplieger/runesafe/v3"
 )
 

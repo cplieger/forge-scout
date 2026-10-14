@@ -1,7 +1,7 @@
 # Example compose for forge-scout. See the README for all configuration options and hardening.
 services:
   forge-scout:
-    image: ghcr.io/cplieger/github-scout:latest
+    image: ghcr.io/cplieger/forge-scout:latest
     container_name: forge-scout
     restart: unless-stopped
     # Must own the ./data host folder. If .env sets PUID and PGID, those numbers are used.

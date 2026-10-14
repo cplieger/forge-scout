@@ -22,7 +22,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cplieger/github-scout/internal/config"
+	"github.com/cplieger/forge-scout/internal/config"
 )
 
 // Product is the product a fake answers as.

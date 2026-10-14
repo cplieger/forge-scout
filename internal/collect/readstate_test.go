@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cplieger/github-scout/internal/config"
-	"github.com/cplieger/github-scout/internal/forge"
+	"github.com/cplieger/forge-scout/internal/config"
+	"github.com/cplieger/forge-scout/internal/forge"
 )
 
 // readFields are the families every scan complete and scan stopped line

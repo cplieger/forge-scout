@@ -14,7 +14,7 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/cplieger/github-scout/internal/forge"
+	"github.com/cplieger/forge-scout/internal/forge"
 	"github.com/cplieger/slogx/capture"
 )
 

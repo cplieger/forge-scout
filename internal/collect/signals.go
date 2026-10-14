@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cplieger/github-scout/internal/forge"
-	"github.com/cplieger/github-scout/internal/runstate"
+	"github.com/cplieger/forge-scout/internal/forge"
+	"github.com/cplieger/forge-scout/internal/runstate"
 )
 
 // Caps on the ranked lines whose full set is not otherwise emitted. The row

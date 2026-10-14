@@ -9,7 +9,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/cplieger/github-scout/internal/forge"
+	"github.com/cplieger/forge-scout/internal/forge"
 )
 
 // Spend is what a connection's requests have cost.

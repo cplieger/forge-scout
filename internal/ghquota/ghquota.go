@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cplieger/github-scout/internal/forge"
+	"github.com/cplieger/forge-scout/internal/forge"
 )
 
 // corePool is the pool a response naming none drew on, and the one the REST
