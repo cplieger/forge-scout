@@ -9,7 +9,7 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/cplieger/github-scout/internal/forge"
+	"github.com/cplieger/forge-scout/internal/forge"
 )
 
 // asOfName is the name an item table shows the time of a kept row under.

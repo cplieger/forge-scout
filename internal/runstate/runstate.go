@@ -30,7 +30,7 @@ import (
 	"time"
 
 	"github.com/cplieger/atomicfile/v4"
-	"github.com/cplieger/github-scout/internal/forge"
+	"github.com/cplieger/forge-scout/internal/forge"
 )
 
 const fileName = "state.json"

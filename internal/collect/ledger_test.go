@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cplieger/github-scout/internal/forge"
+	"github.com/cplieger/forge-scout/internal/forge"
 )
 
 // TestLedger_tables_name_every_reason_and_family pins the ledger's tables to

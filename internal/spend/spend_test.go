@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/cplieger/github-scout/internal/forge"
+	"github.com/cplieger/forge-scout/internal/forge"
 )
 
 type roundTrip func(*http.Request) (*http.Response, error)

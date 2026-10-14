@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cplieger/github-scout/internal/forge"
+	"github.com/cplieger/forge-scout/internal/forge"
 )
 
 // stopKeys are the keys a scan stopped line may carry beside its _read

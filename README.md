@@ -1,6 +1,6 @@
 # forge-scout
 
-[![Image Size](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/cplieger/github-scout/badges/size.json)](https://github.com/cplieger/github-scout/pkgs/container/github-scout) [![Platforms](https://img.shields.io/badge/platforms-amd64%20%7C%20arm64-blue)](https://github.com/cplieger/github-scout/pkgs/container/github-scout) [![base: Distroless](https://img.shields.io/badge/base-Distroless_nonroot-4285F4?logo=google)](https://github.com/cplieger/github-scout/blob/main/Dockerfile) [![Mutation](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/cplieger/github-scout/badges/mutation.json)](https://github.com/cplieger/github-scout/issues?q=label%3Agremlins-tracker) [![SBOM](https://img.shields.io/badge/SBOM-SPDX-1D4ED8)](https://github.com/cplieger/github-scout/releases)
+[![Image Size](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/cplieger/forge-scout/badges/size.json)](https://github.com/cplieger/forge-scout/pkgs/container/forge-scout) [![Platforms](https://img.shields.io/badge/platforms-amd64%20%7C%20arm64-blue)](https://github.com/cplieger/forge-scout/pkgs/container/forge-scout) [![base: Distroless](https://img.shields.io/badge/base-Distroless_nonroot-4285F4?logo=google)](https://github.com/cplieger/forge-scout/blob/main/Dockerfile) [![Mutation](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/cplieger/forge-scout/badges/mutation.json)](https://github.com/cplieger/forge-scout/issues?q=label%3Agremlins-tracker) [![SBOM](https://img.shields.io/badge/SBOM-SPDX-1D4ED8)](https://github.com/cplieger/forge-scout/releases)
 
 <!-- hub-overview BEGIN -->
 forge-scout puts the open pull requests, open issues and failing CI workflows across your repositories on GitHub, GitLab, Gitea and Forgejo on one Grafana dashboard, with a link on every row, and adds code-scanning alerts on GitHub. It only reads from your forges.
@@ -34,12 +34,12 @@ forge-scout is free software under the GPL-3.0-or-later license.
 
 ## Quick start
 
-The image is on GitHub Container Registry and Docker Hub, for `amd64` and `arm64`. This is the [`compose.yaml`](compose.yaml) in this repository.
+The image is on GitHub Container Registry and Docker Hub, for `amd64` and `arm64`. forge-scout was formerly named github-scout, and its earlier images stay published under that name. This is the [`compose.yaml`](compose.yaml) in this repository.
 
 ```yaml
 services:
   forge-scout:
-    image: ghcr.io/cplieger/github-scout:latest
+    image: ghcr.io/cplieger/forge-scout:latest
     container_name: forge-scout
     restart: unless-stopped
     # Must own the ./data host folder. If .env sets PUID and PGID, those numbers are used.

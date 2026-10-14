@@ -21,10 +21,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cplieger/forge-scout/internal/forge"
+	"github.com/cplieger/forge-scout/internal/ghquota"
+	"github.com/cplieger/forge-scout/internal/urlsafe"
 	"github.com/cplieger/forgeapi/readcache"
-	"github.com/cplieger/github-scout/internal/forge"
-	"github.com/cplieger/github-scout/internal/ghquota"
-	"github.com/cplieger/github-scout/internal/urlsafe"
 	"github.com/cplieger/httpx/v5"
 	"github.com/cplieger/jsoncap/v2"
 	"github.com/cplieger/ssrf/v4"

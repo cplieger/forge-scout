@@ -20,10 +20,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/cplieger/github-scout/internal/config"
-	"github.com/cplieger/github-scout/internal/forge"
-	"github.com/cplieger/github-scout/internal/runstate"
-	"github.com/cplieger/github-scout/internal/spend"
+	"github.com/cplieger/forge-scout/internal/config"
+	"github.com/cplieger/forge-scout/internal/forge"
+	"github.com/cplieger/forge-scout/internal/runstate"
+	"github.com/cplieger/forge-scout/internal/spend"
 )
 
 // Conn is one open forge connection, as the collector reads it.

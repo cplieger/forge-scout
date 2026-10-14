@@ -190,8 +190,8 @@ Every panel uses one Loki selector and names the fields it reads, for example:
 
 The dashboard is versioned with the app. The JSON at release `<tag>` matches the log fields that image writes. The file sets `metadata.name` to `forge-scout`, which Grafana uses as the dashboard UID. Because the name stays the same from release to release, importing a newer copy over the existing one, or a file provider reading the newer file, updates it in place. Pin it the way you pin the image, to the tag of the image you run. Each release publishes it in two forms:
 
-- The release asset `https://github.com/cplieger/github-scout/releases/download/<tag>/grafana-dashboard.json`, with `grafana-dashboard.json.sha256` beside it. It works as the Grafana Helm chart's `dashboards.<provider>.<name>.url` with `curlOptions: "-sLf"`, because the release URL redirects, or as a Terraform `http` data source. Renovate can track the URL with its `github-releases` datasource.
-- The OCI artifact `ghcr.io/cplieger/github-scout/dashboard:<tag>`, with the artifact type `application/vnd.grafana.dashboard.v2+json`.
+- The release asset `https://github.com/cplieger/forge-scout/releases/download/<tag>/grafana-dashboard.json`, with `grafana-dashboard.json.sha256` beside it. It works as the Grafana Helm chart's `dashboards.<provider>.<name>.url` with `curlOptions: "-sLf"`, because the release URL redirects, or as a Terraform `http` data source. Renovate can track the URL with its `github-releases` datasource.
+- The OCI artifact `ghcr.io/cplieger/forge-scout/dashboard:<tag>`, with the artifact type `application/vnd.grafana.dashboard.v2+json`.
 
 The file is a Grafana dashboard resource with `apiVersion: dashboard.grafana.app/v2`, which grafana-operator's `GrafanaDashboard` does not accept. Load it with a `GrafanaManifest`, as grafana-operator's [dashboards v2 example](https://grafana.github.io/grafana-operator/docs/examples/manifests/dashboards-v2/) shows. A `GrafanaManifest` takes the dashboard inline and has no URL or OCI source. Copy the `spec` object of the release's `grafana-dashboard.json` in place of the comment below, and copy it again when you move to a new tag.
 
@@ -221,7 +221,7 @@ With Terraform, the Grafana provider's [`grafana_apps_dashboard_dashboard_v2`](h
 
 ```hcl
 data "http" "forge_scout_dashboard" {
-  url = "https://github.com/cplieger/github-scout/releases/download/<tag>/grafana-dashboard.json"
+  url = "https://github.com/cplieger/forge-scout/releases/download/<tag>/grafana-dashboard.json"
 }
 
 resource "grafana_apps_dashboard_dashboard_v2" "forge_scout" {

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cplieger/github-scout/internal/forge"
+	"github.com/cplieger/forge-scout/internal/forge"
 )
 
 func TestScan_a_pull_request_run_on_a_branch_named_like_the_default_is_not_a_default_branch_run(t *testing.T) {

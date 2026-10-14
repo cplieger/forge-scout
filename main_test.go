@@ -13,12 +13,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cplieger/github-scout/internal/collect"
-	"github.com/cplieger/github-scout/internal/config"
-	"github.com/cplieger/github-scout/internal/forge"
-	"github.com/cplieger/github-scout/internal/forgeconn/forgeconntest"
-	"github.com/cplieger/github-scout/internal/githubrest"
-	"github.com/cplieger/github-scout/internal/runstate"
+	"github.com/cplieger/forge-scout/internal/collect"
+	"github.com/cplieger/forge-scout/internal/config"
+	"github.com/cplieger/forge-scout/internal/forge"
+	"github.com/cplieger/forge-scout/internal/forgeconn/forgeconntest"
+	"github.com/cplieger/forge-scout/internal/githubrest"
+	"github.com/cplieger/forge-scout/internal/runstate"
 	"github.com/cplieger/slogx"
 	"github.com/cplieger/slogx/capture"
 )

@@ -3,8 +3,8 @@ package collect
 import (
 	"log/slog"
 
-	"github.com/cplieger/github-scout/internal/forge"
-	"github.com/cplieger/github-scout/internal/spend"
+	"github.com/cplieger/forge-scout/internal/forge"
+	"github.com/cplieger/forge-scout/internal/spend"
 )
 
 // requestFamilies names the requests_<family> keys of each read phase, in

@@ -13,7 +13,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 RUN mkdir -p /out/data /out/config
 COPY LICENSE NOTICE THIRD_PARTY_NOTICES.md ./
 COPY scripts/collect-licenses.sh scripts/
-RUN sh scripts/collect-licenses.sh --name github-scout .
+RUN sh scripts/collect-licenses.sh --name forge-scout .
 
 FROM gcr.io/distroless/static-debian13:nonroot@sha256:e2e927ec666bae08560abb3c55d0659eceabb657f56b6782ab500a9fc7f555e3
 

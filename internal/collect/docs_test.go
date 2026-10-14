@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cplieger/github-scout/internal/config"
+	"github.com/cplieger/forge-scout/internal/config"
 )
 
 // monitoringDoc is the operator page that documents the log contract.

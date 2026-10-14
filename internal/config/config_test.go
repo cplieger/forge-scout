@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cplieger/github-scout/internal/runstate"
+	"github.com/cplieger/forge-scout/internal/runstate"
 	"github.com/cplieger/scheduler/v4"
 	"github.com/cplieger/slogx/capture"
 )
