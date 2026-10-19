@@ -205,10 +205,7 @@ func TestScan_a_gitlab_user_named_by_digits_alone_is_read_per_project(t *testing
 	}
 }
 
-// TestScan_a_refused_github_only_dial_names_its_connection redirects the
-// code-scanning read to a port the connection does not allow, so the
-// transport refuses the dial, and checks that refusal names its connection.
-func TestScan_a_refused_github_only_dial_names_its_connection(t *testing.T) {
+func TestScan_a_refused_github_only_redirect_names_its_connection(t *testing.T) {
 	rec := capture.Default(t)
 	base := scopeDefault()
 	w := world("acme")
@@ -221,7 +218,7 @@ func TestScan_a_refused_github_only_dial_names_its_connection(t *testing.T) {
 	c.Scan(t.Context())
 	refusals := 0
 	for _, r := range rec.Records() {
-		if r.Message != "ssrf dial blocked" {
+		if r.Message != "code scanning unreadable" {
 			continue
 		}
 		refusals++
@@ -230,12 +227,13 @@ func TestScan_a_refused_github_only_dial_names_its_connection(t *testing.T) {
 			attrs[a.Key] = a.Value.String()
 			return true
 		})
-		if attrs["forge"] != "github" || attrs["connection"] != "hub" {
-			t.Errorf("ssrf dial blocked carries forge %q and connection %q, want github and hub", attrs["forge"], attrs["connection"])
+		if attrs["forge"] != "github" || attrs["connection"] != "hub" || !strings.Contains(attrs["error"], "refusing redirect to http://127.0.0.1:9") {
+			t.Errorf("code scanning unreadable carries forge %q, connection %q and error %q, want github, hub and the redirect refusal",
+				attrs["forge"], attrs["connection"], attrs["error"])
 		}
 	}
 	if refusals == 0 {
-		t.Fatalf("no ssrf dial blocked line; messages %v", rec.Messages())
+		t.Fatalf("no code scanning unreadable line; messages %v", rec.Messages())
 	}
 }
 

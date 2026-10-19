@@ -131,9 +131,11 @@ func httpClient(base string, private, plaintext bool, opts ...ssrf.TransportOpti
 	if private {
 		opts = append(opts, ssrf.WithAddressPolicy(func(netip.Addr) bool { return true }))
 	}
-	hc := httpx.NewClient(30 * time.Second)
-	hc.Transport = ssrf.SafeTransport(opts...)
-	return hc
+	return &http.Client{
+		Timeout:       30 * time.Second,
+		CheckRedirect: httpx.RedirectPolicyFunc(httpx.WithSameOrigin(true)),
+		Transport:     ssrf.SafeTransport(opts...),
+	}
 }
 
 // APIBase is the REST root for a connection: apiURL when set, else

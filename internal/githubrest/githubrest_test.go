@@ -663,6 +663,70 @@ func TestCodeScanningAlerts_a_refused_cross_host_redirect_is_not_retried(t *test
 	}
 }
 
+func TestHTTPClient_a_redirect_to_another_port_on_the_host_gets_no_token(t *testing.T) {
+	var leaked atomic.Int32
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "" {
+			leaked.Add(1)
+		}
+		io.WriteString(w, "[]")
+	}))
+	t.Cleanup(other.Close)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, other.URL+r.URL.RequestURI(), http.StatusFound)
+	}))
+	t.Cleanup(srv.Close)
+	var ports []uint16
+	for _, s := range []*httptest.Server{srv, other} {
+		u, err := url.Parse(s.URL)
+		if err != nil {
+			t.Fatalf("Setup: %v", err)
+		}
+		n, err := strconv.ParseUint(u.Port(), 10, 16)
+		if err != nil {
+			t.Fatalf("Setup: %v", err)
+		}
+		ports = append(ports, uint16(n))
+	}
+	// Both ports are admitted so only the redirect policy can stop the hop,
+	// as it must for a base on a custom port redirecting to 443.
+	c, err := New(httpClient(srv.URL, true, true, ssrf.WithAllowedPorts(ports...)), srv.URL, "test-token", testVersion, armed(),
+		slog.New(slog.DiscardHandler), httpx.WithMaxAttempts(1))
+	if err != nil {
+		t.Fatalf("Setup: New = %v", err)
+	}
+	if _, err := c.CodeScanningAlerts(t.Context(), repo); err == nil || leaked.Load() != 0 {
+		t.Errorf("CodeScanningAlerts redirected to another port = %v with the token sent %d times, want an error and no token sent", err, leaked.Load())
+	}
+}
+
+// RFC 4007 section 11.2 leaves zone-ID representation implementation-defined,
+// so httpx compares its bytes exactly and treats a case change as another
+// origin.
+func TestHTTPClient_a_redirect_to_the_host_under_another_zone_case_is_refused(t *testing.T) {
+	const base = "https://[fe80::1%25eth0]"
+	hc := httpClient(base, true, false)
+	hop := func(target string) error {
+		t.Helper()
+		orig, err := http.NewRequestWithContext(t.Context(), http.MethodGet, base+"/repos/acme/app/code-scanning/alerts", http.NoBody)
+		if err != nil {
+			t.Fatalf("Setup: %v", err)
+		}
+		next, err := http.NewRequestWithContext(t.Context(), http.MethodGet, target, http.NoBody)
+		if err != nil {
+			t.Fatalf("Setup: %v", err)
+		}
+		return hc.CheckRedirect(next, []*http.Request{orig})
+	}
+	err := hop("https://[fe80::1%25ETH0]/next")
+	if refused, ok := errors.AsType[*httpx.RedirectRefusedError](err); !ok || refused.Reason != httpx.RedirectOtherOrigin {
+		t.Errorf("CheckRedirect to zone ETH0 from zone eth0 = %v, want a refusal as another origin", err)
+	}
+	if err := hop("https://[fe80::1%25eth0]/next"); err != nil {
+		t.Errorf("CheckRedirect to the same zone = %v, want it followed", err)
+	}
+}
+
 // loopbackResolver answers every name with 127.0.0.1, as a rebound DNS
 // answer would, and counts its lookups.
 type loopbackResolver struct{ lookups atomic.Int32 }
