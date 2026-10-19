@@ -43,16 +43,18 @@ func FuzzLoad(f *testing.F) {
 	f.Add("a: &x [*x]\n")
 	f.Add("")
 	f.Fuzz(func(t *testing.T, doc string) {
-		t.Setenv("FORGE_SCOUT_FUZZ_TOKEN", plantedSecret)
-		t.Setenv("GITHUB_TOKEN", plantedSecret)
-		t.Setenv("FORGE_SCOUT_FUZZ_DURATION", plantedDuration)
-		t.Setenv("FORGE_SCOUT_FUZZ_SHORT", plantedShort)
-		t.Setenv("FORGE_SCOUT_FUZZ_LEVEL", plantedLevel)
+		t.Parallel()
 		path := filepath.Join(t.TempDir(), "config.yaml")
 		if err := os.WriteFile(path, []byte(doc), 0o600); err != nil {
 			t.Fatalf("Setup: %v", err)
 		}
-		_, warns, err := Load(path)
+		_, warns, err := load(path, env(map[string]string{
+			"FORGE_SCOUT_FUZZ_TOKEN":    plantedSecret,
+			"GITHUB_TOKEN":              plantedSecret,
+			"FORGE_SCOUT_FUZZ_DURATION": plantedDuration,
+			"FORGE_SCOUT_FUZZ_SHORT":    plantedShort,
+			"FORGE_SCOUT_FUZZ_LEVEL":    plantedLevel,
+		}))
 		for _, v := range []string{plantedSecret, plantedDuration, plantedDurationShown, plantedShort, plantedLevel, plantedLevelShown} {
 			if strings.Contains(strings.ToLower(doc), strings.ToLower(v)) {
 				continue

@@ -144,8 +144,10 @@ func Path() string {
 // Load reads, expands and validates the file at path. A missing file is an
 // error wrapping os.ErrNotExist. Every validation problem is joined into the
 // one error returned.
-func Load(path string) (Config, []Warning, error) {
-	fc, src, unresolved, err := decode(path)
+func Load(path string) (Config, []Warning, error) { return load(path, os.LookupEnv) }
+
+func load(path string, lookup func(name string) (string, bool)) (Config, []Warning, error) {
+	fc, src, unresolved, err := decode(path, lookup)
 	if err != nil {
 		return Config{}, nil, err
 	}
@@ -251,7 +253,11 @@ func (s source) overlap(interval, lookback time.Duration) error {
 // ScanIntervalFromFile returns the file's effective scan interval, or the
 // default on any error, without reporting anything: it serves the health probe.
 func ScanIntervalFromFile(path string) time.Duration {
-	cfg, _, err := Load(path)
+	return scanIntervalFromFile(path, os.LookupEnv)
+}
+
+func scanIntervalFromFile(path string, lookup func(name string) (string, bool)) time.Duration {
+	cfg, _, err := load(path, lookup)
 	if err != nil {
 		return DefaultScanInterval
 	}
@@ -259,15 +265,15 @@ func ScanIntervalFromFile(path string) time.Duration {
 }
 
 // decode reads and expands the file, and returns its values as written.
-func decode(path string) (fc fileConfig, src source, unresolved []string, err error) {
+func decode(path string, lookup func(name string) (string, bool)) (fc fileConfig, src source, unresolved []string, err error) {
 	raw, err := readFile(path)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) && legacyEnvSet() {
+		if errors.Is(err, os.ErrNotExist) && legacyEnvSet(lookup) {
 			return fileConfig{}, nil, nil, fmt.Errorf("read config %q: %w. forge-scout reads its settings from this file, not from environment variables such as GITHUB_OWNER. See the README", path, err)
 		}
 		return fileConfig{}, nil, nil, fmt.Errorf("read config %q: %w", path, err)
 	}
-	unresolved, err = yamlenv.Load(raw, &fc, allowedEnv, yamlenv.WithSanitizeOptions(yamlenv.WithUnknownKeyEcho(true)))
+	unresolved, err = yamlenv.Load(raw, &fc, allowedEnv, yamlenv.WithLookupEnv(lookup), yamlenv.WithSanitizeOptions(yamlenv.WithUnknownKeyEcho(true)))
 	if err != nil {
 		return fileConfig{}, nil, nil, fmt.Errorf("parse config %q: %w", path, err)
 	}
@@ -396,7 +402,11 @@ func readFile(path string) ([]byte, error) {
 // legacyEnvSet reports GITHUB_OWNER or GITHUB_TOKEN, the variables the
 // environment-configured releases read, so a missing file beside one names
 // the move to a file.
-func legacyEnvSet() bool { return os.Getenv("GITHUB_OWNER") != "" || os.Getenv("GITHUB_TOKEN") != "" }
+func legacyEnvSet(lookup func(name string) (string, bool)) bool {
+	owner, _ := lookup("GITHUB_OWNER")
+	token, _ := lookup("GITHUB_TOKEN")
+	return owner != "" || token != ""
+}
 
 func allowedEnv(name string) bool {
 	return strings.HasSuffix(name, "_TOKEN") || strings.HasPrefix(name, "FORGE_SCOUT_")
