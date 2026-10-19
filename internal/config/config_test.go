@@ -26,6 +26,15 @@ func writeConfig(t *testing.T, body string) string {
 	return path
 }
 
+func env(vars map[string]string) func(string) (string, bool) {
+	return func(name string) (string, bool) {
+		v, ok := vars[name]
+		return v, ok
+	}
+}
+
+var tokenEnv = env(map[string]string{"GITHUB_TOKEN": "test-token"})
+
 const minimal = `
 connections:
   - name: github
@@ -35,8 +44,8 @@ connections:
 `
 
 func TestLoad_minimal_file_takes_the_defaults(t *testing.T) {
-	t.Setenv("GITHUB_TOKEN", "test-token")
-	cfg, warns, err := Load(writeConfig(t, minimal))
+	t.Parallel()
+	cfg, warns, err := load(writeConfig(t, minimal), tokenEnv)
 	if err != nil {
 		t.Fatalf("Load(minimal) = error %v, want nil", err)
 	}
@@ -65,23 +74,21 @@ func TestLoad_minimal_file_takes_the_defaults(t *testing.T) {
 }
 
 func TestLoad_keeps_the_token_bytes_verbatim(t *testing.T) {
-	t.Setenv("GITHUB_TOKEN", "  exact token bytes\t")
-	cfg, _, err := Load(writeConfig(t, minimal))
+	t.Parallel()
+	cfg, _, err := load(writeConfig(t, minimal), env(map[string]string{"GITHUB_TOKEN": "  exact token bytes\t"}))
 	if err != nil {
 		t.Fatalf("Load(token with edge whitespace) = error %v, want nil", err)
 	}
 	if got := cfg.Connections[0].Token; got != "  exact token bytes\t" {
 		t.Errorf("Token = %q, want the environment value byte for byte", got)
 	}
-	t.Setenv("GITHUB_TOKEN", " \t ")
-	if _, _, err := Load(writeConfig(t, minimal)); err == nil || !strings.Contains(err.Error(), "token references GITHUB_TOKEN, which is empty") {
+	if _, _, err := load(writeConfig(t, minimal), env(map[string]string{"GITHUB_TOKEN": " \t "})); err == nil || !strings.Contains(err.Error(), "token references GITHUB_TOKEN, which is empty") {
 		t.Errorf("Load(blank token) = %v, want token references GITHUB_TOKEN, which is empty", err)
 	}
 }
 
 func TestLoad_parses_every_key(t *testing.T) {
-	t.Setenv("FORGE_SCOUT_GITEA_TOKEN", "gitea-token")
-	t.Setenv("GITHUB_TOKEN", "test-token")
+	t.Parallel()
 	body := `
 scan_interval: 30m
 lookback: 48h
@@ -106,7 +113,7 @@ connections:
     private_addresses: true
     allow_plaintext: true
 `
-	cfg, warns, err := Load(writeConfig(t, body))
+	cfg, warns, err := load(writeConfig(t, body), env(map[string]string{"FORGE_SCOUT_GITEA_TOKEN": "gitea-token", "GITHUB_TOKEN": "test-token"}))
 	if err != nil {
 		t.Fatalf("Load = error %v, want nil", err)
 	}
@@ -146,7 +153,7 @@ connections:
 }
 
 func TestLoad_refuses_invalid_files(t *testing.T) {
-	t.Setenv("GITHUB_TOKEN", "test-token")
+	t.Parallel()
 	tests := []struct {
 		name string
 		body string
@@ -213,7 +220,7 @@ func TestLoad_refuses_invalid_files(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			_, _, err := Load(writeConfig(t, tc.body))
+			_, _, err := load(writeConfig(t, tc.body), tokenEnv)
 			if err == nil {
 				t.Fatalf("Load(%s) = nil error, want one mentioning %q", tc.name, tc.want)
 			}
@@ -225,7 +232,7 @@ func TestLoad_refuses_invalid_files(t *testing.T) {
 }
 
 func TestLoad_refuses_a_token_that_is_not_exactly_one_reference(t *testing.T) {
-	t.Setenv("GITHUB_TOKEN", "test-token")
+	t.Parallel()
 	const secret = "plaintext-secret-value"
 	tests := []struct{ name, token string }{
 		{"literal", secret},
@@ -239,7 +246,7 @@ func TestLoad_refuses_a_token_that_is_not_exactly_one_reference(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			body := "connections:\n  - name: a\n    url: https://github.com\n    token: " + tc.token + "\n    owners: [o]\n"
-			_, _, err := Load(writeConfig(t, body))
+			_, _, err := load(writeConfig(t, body), tokenEnv)
 			if err == nil {
 				t.Fatalf("Load(token %s) = nil error, want it refused", tc.name)
 			}
@@ -251,10 +258,10 @@ func TestLoad_refuses_a_token_that_is_not_exactly_one_reference(t *testing.T) {
 }
 
 func TestLoad_accepts_a_quoted_token_reference(t *testing.T) {
-	t.Setenv("GITHUB_TOKEN", "test-token")
+	t.Parallel()
 	for _, token := range []string{`"${GITHUB_TOKEN}"`, `'${GITHUB_TOKEN}'`} {
 		body := "connections:\n  - name: a\n    url: https://github.com\n    token: " + token + "\n    owners: [o]\n"
-		cfg, _, err := Load(writeConfig(t, body))
+		cfg, _, err := load(writeConfig(t, body), tokenEnv)
 		if err != nil || cfg.Connections[0].Token != "test-token" {
 			t.Errorf("Load(token %s) = %v, want the expanded token", token, err)
 		}
@@ -262,26 +269,25 @@ func TestLoad_accepts_a_quoted_token_reference(t *testing.T) {
 }
 
 func TestLoad_unset_token_reference_names_the_variable_not_a_value(t *testing.T) {
-	t.Setenv("GITHUB_TOKEN", "")
-	os.Unsetenv("GITHUB_TOKEN")
-	_, _, err := Load(writeConfig(t, minimal))
+	t.Parallel()
+	_, _, err := load(writeConfig(t, minimal), env(nil))
 	if err == nil || !strings.Contains(err.Error(), "GITHUB_TOKEN") || !strings.Contains(err.Error(), `"github"`) {
 		t.Fatalf("Load with GITHUB_TOKEN unset = %v, want an error naming the connection and the variable", err)
 	}
 }
 
 func TestLoad_empty_token_variable_names_the_variable_not_a_value(t *testing.T) {
-	t.Setenv("GITHUB_TOKEN", "")
-	_, _, err := Load(writeConfig(t, minimal))
+	t.Parallel()
+	_, _, err := load(writeConfig(t, minimal), env(map[string]string{"GITHUB_TOKEN": ""}))
 	if err == nil || !strings.Contains(err.Error(), "token references GITHUB_TOKEN, which is empty") || !strings.Contains(err.Error(), `"github"`) {
 		t.Fatalf("Load with GITHUB_TOKEN set and empty = %v, want an error naming the connection and the variable", err)
 	}
 }
 
 func TestLoad_expands_only_allowlisted_names(t *testing.T) {
-	t.Setenv("HOME_SECRET", "must-not-appear")
+	t.Parallel()
 	body := "connections:\n  - name: a\n    url: https://github.com\n    token: ${HOME_SECRET}\n    owners: [o]\n"
-	_, _, err := Load(writeConfig(t, body))
+	_, _, err := load(writeConfig(t, body), env(map[string]string{"HOME_SECRET": "must-not-appear"}))
 	if err == nil {
 		t.Fatal("Load with a token referencing a non-allowlisted variable = nil error, want the unexpanded reference refused")
 	}
@@ -291,7 +297,7 @@ func TestLoad_expands_only_allowlisted_names(t *testing.T) {
 }
 
 func TestLoad_durations_clamp_and_fall_back(t *testing.T) {
-	t.Setenv("GITHUB_TOKEN", "test-token")
+	t.Parallel()
 	tests := []struct {
 		name         string
 		head         string
@@ -310,7 +316,7 @@ func TestLoad_durations_clamp_and_fall_back(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			cfg, warns, err := Load(writeConfig(t, tc.head+minimal))
+			cfg, warns, err := load(writeConfig(t, tc.head+minimal), tokenEnv)
 			if err != nil {
 				t.Fatalf("Load(%s) = error %v, want nil", tc.name, err)
 			}
@@ -325,7 +331,7 @@ func TestLoad_durations_clamp_and_fall_back(t *testing.T) {
 }
 
 func TestLoad_refuses_a_lookback_shorter_than_two_intervals_and_one_scan(t *testing.T) {
-	t.Setenv("GITHUB_TOKEN", "test-token")
+	t.Parallel()
 	tests := []struct {
 		name string
 		head string
@@ -340,7 +346,7 @@ func TestLoad_refuses_a_lookback_shorter_than_two_intervals_and_one_scan(t *test
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			_, _, err := Load(writeConfig(t, tc.head+minimal))
+			_, _, err := load(writeConfig(t, tc.head+minimal), tokenEnv)
 			if tc.want == nil {
 				if err != nil {
 					t.Errorf("Load(%s) = %v, want nil: the lookback covers two intervals and one scan at its limit", tc.name, err)
@@ -415,12 +421,11 @@ func TestConnection_Instance_names_one_forge_in_every_spelling(t *testing.T) {
 }
 
 func TestLoad_missing_file_with_old_variables_names_the_migration(t *testing.T) {
+	t.Parallel()
 	for _, name := range []string{"GITHUB_OWNER", "GITHUB_TOKEN"} {
 		t.Run(name, func(t *testing.T) {
-			t.Setenv("GITHUB_OWNER", "")
-			t.Setenv("GITHUB_TOKEN", "")
-			t.Setenv(name, "example")
-			_, _, err := Load(filepath.Join(t.TempDir(), "config.yaml"))
+			t.Parallel()
+			_, _, err := load(filepath.Join(t.TempDir(), "config.yaml"), env(map[string]string{name: "example"}))
 			if err == nil || !errors.Is(err, os.ErrNotExist) || !strings.Contains(err.Error(), "README") {
 				t.Fatalf("Load(missing) with %s set = %v, want a not-exist error pointing at the README migration", name, err)
 			}
@@ -432,9 +437,8 @@ func TestLoad_missing_file_with_old_variables_names_the_migration(t *testing.T) 
 }
 
 func TestLoad_missing_file_is_a_not_exist_error(t *testing.T) {
-	t.Setenv("GITHUB_OWNER", "")
-	t.Setenv("GITHUB_TOKEN", "")
-	_, _, err := Load(filepath.Join(t.TempDir(), "config.yaml"))
+	t.Parallel()
+	_, _, err := load(filepath.Join(t.TempDir(), "config.yaml"), env(map[string]string{"GITHUB_OWNER": "", "GITHUB_TOKEN": ""}))
 	if !errors.Is(err, os.ErrNotExist) || strings.Contains(err.Error(), "README") {
 		t.Fatalf("Load(missing) with no old variable set = %v, want os.ErrNotExist and no migration hint", err)
 	}
@@ -453,11 +457,10 @@ func TestLoad_refuses_a_fifo_without_blocking(t *testing.T) {
 
 func TestLoad_never_logs(t *testing.T) {
 	rec := capture.Default(t)
-	t.Setenv("GITHUB_TOKEN", "test-token")
-	if _, _, err := Load(writeConfig(t, "scan_interval: nope\n"+minimal)); err != nil {
+	if _, _, err := load(writeConfig(t, "scan_interval: nope\n"+minimal), tokenEnv); err != nil {
 		t.Fatalf("Load = error %v", err)
 	}
-	if _, _, err := Load(writeConfig(t, "bogus: 1\n")); err == nil {
+	if _, _, err := load(writeConfig(t, "bogus: 1\n"), tokenEnv); err == nil {
 		t.Fatal("Load(bogus) = nil error")
 	}
 	if rec.Len() != 0 {
@@ -466,14 +469,14 @@ func TestLoad_never_logs(t *testing.T) {
 }
 
 func TestScanIntervalFromFile(t *testing.T) {
-	t.Setenv("GITHUB_TOKEN", "test-token")
-	if got := ScanIntervalFromFile(writeConfig(t, "scan_interval: 5m\n"+minimal)); got != 5*time.Minute {
+	t.Parallel()
+	if got := scanIntervalFromFile(writeConfig(t, "scan_interval: 5m\n"+minimal), tokenEnv); got != 5*time.Minute {
 		t.Errorf("ScanIntervalFromFile(5m) = %v, want 5m0s", got)
 	}
-	if got := ScanIntervalFromFile(filepath.Join(t.TempDir(), "absent.yaml")); got != 15*time.Minute {
+	if got := scanIntervalFromFile(filepath.Join(t.TempDir(), "absent.yaml"), tokenEnv); got != 15*time.Minute {
 		t.Errorf("ScanIntervalFromFile(absent) = %v, want 15m0s", got)
 	}
-	if got := ScanIntervalFromFile(writeConfig(t, "scan_interval: 5m\nbogus: 1\n")); got != 15*time.Minute {
+	if got := scanIntervalFromFile(writeConfig(t, "scan_interval: 5m\nbogus: 1\n"), tokenEnv); got != 15*time.Minute {
 		t.Errorf("ScanIntervalFromFile(invalid file) = %v, want 15m0s", got)
 	}
 }
@@ -505,12 +508,11 @@ func mkfifo(path string) error { return syscall.Mkfifo(path, 0o600) }
 // top-level list top, and returns that connection.
 func loadExcludes(t *testing.T, top, rules string) Connection {
 	t.Helper()
-	t.Setenv("GITHUB_TOKEN", "test-token")
 	body := "exclude:\n" + top + minimal + "    exclude:\n" + rules
 	if top == "" {
 		body = minimal + "    exclude:\n" + rules
 	}
-	cfg, _, err := Load(writeConfig(t, body))
+	cfg, _, err := load(writeConfig(t, body), tokenEnv)
 	if err != nil {
 		t.Fatalf("Setup: Load(%q) = %v", body, err)
 	}
@@ -518,6 +520,7 @@ func loadExcludes(t *testing.T, top, rules string) Connection {
 }
 
 func TestConnection_Excluded_needs_every_condition_of_one_rule(t *testing.T) {
+	t.Parallel()
 	c := loadExcludes(t, "", "      - {author: renovate-bot, label: dependencies}\n")
 	tests := []struct {
 		name string
@@ -539,6 +542,7 @@ func TestConnection_Excluded_needs_every_condition_of_one_rule(t *testing.T) {
 }
 
 func TestConnection_Excluded_matches_any_one_rule_and_names_the_first(t *testing.T) {
+	t.Parallel()
 	c := loadExcludes(t, "  - {author: tribble-trouble}\n", "      - {label: dependencies}\n      - {author: Tribble-Trouble, label: dependencies}\n")
 	tests := []struct {
 		name string
@@ -562,6 +566,7 @@ func TestConnection_Excluded_matches_any_one_rule_and_names_the_first(t *testing
 }
 
 func TestConnection_Excluded_reads_each_condition(t *testing.T) {
+	t.Parallel()
 	pr := func(it Item) Item { it.Kind = KindPullRequest; return it }
 	issue := func(it Item) Item { it.Kind = KindIssue; return it }
 	tests := []struct {
@@ -598,6 +603,7 @@ func TestConnection_Excluded_reads_each_condition(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			c := loadExcludes(t, "", "      - "+tc.rule+"\n")
 			if _, got := c.Excluded(&tc.item); got != tc.want {
 				t.Errorf("rule %s Excluded(%+v) = %t, want %t", tc.rule, tc.item, got, tc.want)
@@ -607,8 +613,8 @@ func TestConnection_Excluded_reads_each_condition(t *testing.T) {
 }
 
 func TestConnection_Excluded_with_no_rule_keeps_every_item(t *testing.T) {
-	t.Setenv("GITHUB_TOKEN", "test-token")
-	cfg, _, err := Load(writeConfig(t, minimal))
+	t.Parallel()
+	cfg, _, err := load(writeConfig(t, minimal), tokenEnv)
 	if err != nil {
 		t.Fatalf("Setup: Load(minimal) = %v", err)
 	}
@@ -619,9 +625,8 @@ func TestConnection_Excluded_with_no_rule_keeps_every_item(t *testing.T) {
 }
 
 func TestLoad_the_shipped_example_config(t *testing.T) {
-	t.Setenv("GITHUB_TOKEN", "test-token")
-	t.Setenv("FORGEJO_TOKEN", "test-token")
-	cfg, warns, err := Load(filepath.Join("..", "..", "config.example.yaml"))
+	t.Parallel()
+	cfg, warns, err := load(filepath.Join("..", "..", "config.example.yaml"), env(map[string]string{"GITHUB_TOKEN": "test-token", "FORGEJO_TOKEN": "test-token"}))
 	if err != nil || len(warns) != 0 {
 		t.Fatalf("Load(config.example.yaml) = %v, warnings %v, want the example to load clean", err, warns)
 	}
@@ -631,14 +636,14 @@ func TestLoad_the_shipped_example_config(t *testing.T) {
 }
 
 func TestLoad_refuses_a_token_variable_outside_token(t *testing.T) {
-	t.Setenv("GITHUB_TOKEN", "secret-token-value")
+	t.Parallel()
 	for _, body := range []string{
 		"connections:\n  - name: ${GITHUB_TOKEN}\n    url: https://github.com\n    token: ${GITHUB_TOKEN}\n    owners: [o]\n",
 		"connections:\n  - name: a\n    url: https://github.com\n    token: ${GITHUB_TOKEN}\n    owners: [\"${GITHUB_TOKEN}\"]\n",
 		"connections:\n  - name: a\n    url: https://github.com\n    token: &t ${GITHUB_TOKEN}\n    owners: [o]\n    bot_authors: [*t]\n",
 		"connections:\n  - name: a\n    url: https://github.com\n    token: ${GITHUB_TOKEN}\n    owners: [o]\n    security:\n      skip_repos: [\"o/${GITHUB_TOKEN}\"]\n",
 	} {
-		_, _, err := Load(writeConfig(t, body))
+		_, _, err := load(writeConfig(t, body), env(map[string]string{"GITHUB_TOKEN": "secret-token-value"}))
 		if err == nil || strings.Contains(err.Error(), "secret-token-value") || !strings.Contains(err.Error(), "outside token") {
 			t.Errorf("Load(%q) = %v, want a refusal that does not carry the value", body, err)
 		}
@@ -647,9 +652,9 @@ func TestLoad_refuses_a_token_variable_outside_token(t *testing.T) {
 
 func TestLoad_refuses_a_variable_a_token_reads_anywhere_else(t *testing.T) {
 	const secret = "https://credential.example/opaque-token"
-	t.Setenv("FORGE_SCOUT_SECRET", secret)
+	t.Parallel()
 	body := "connections:\n  - name: a\n    url: ${FORGE_SCOUT_SECRET}\n    token: ${FORGE_SCOUT_SECRET}\n    owners: [o]\n"
-	cfg, warns, err := Load(writeConfig(t, body))
+	cfg, warns, err := load(writeConfig(t, body), env(map[string]string{"FORGE_SCOUT_SECRET": secret}))
 	if err == nil {
 		t.Fatalf("Load = url %q, nil error, want a refusal: the url would log the token variable", cfg.Connections[0].URL)
 	}
@@ -666,10 +671,9 @@ func TestLoad_refuses_a_variable_a_token_reads_anywhere_else(t *testing.T) {
 }
 
 func TestLoad_a_prefixed_variable_no_token_reads_expands_in_any_value(t *testing.T) {
-	t.Setenv("GITHUB_TOKEN", "test-token")
-	t.Setenv("FORGE_SCOUT_GITHUB_URL", "https://github.example")
+	t.Parallel()
 	body := "connections:\n  - name: a\n    url: ${FORGE_SCOUT_GITHUB_URL}\n    token: ${GITHUB_TOKEN}\n    owners: [o]\n"
-	cfg, _, err := Load(writeConfig(t, body))
+	cfg, _, err := load(writeConfig(t, body), env(map[string]string{"GITHUB_TOKEN": "test-token", "FORGE_SCOUT_GITHUB_URL": "https://github.example"}))
 	if err != nil {
 		t.Fatalf("Load with FORGE_SCOUT_GITHUB_URL as the url = %v, want it loaded", err)
 	}
@@ -679,10 +683,9 @@ func TestLoad_a_prefixed_variable_no_token_reads_expands_in_any_value(t *testing
 }
 
 func TestLoad_an_unreferenced_token_variable_never_refuses_the_file(t *testing.T) {
-	t.Setenv("GITHUB_TOKEN", "test-token")
-	t.Setenv("X_TOKEN", "github")
+	t.Parallel()
 	body := "connections:\n  - name: github\n    url: https://github.com\n    token: ${GITHUB_TOKEN}\n    owners: [github]\n"
-	if _, _, err := Load(writeConfig(t, body)); err != nil {
+	if _, _, err := load(writeConfig(t, body), env(map[string]string{"GITHUB_TOKEN": "test-token", "X_TOKEN": "github"})); err != nil {
 		t.Errorf("Load with an unrelated X_TOKEN whose value appears in the file = %v, want it loaded: the file never references X_TOKEN", err)
 	}
 }
@@ -692,7 +695,7 @@ func TestLoad_an_unreferenced_token_variable_never_refuses_the_file(t *testing.T
 // warning may carry it, in any form a diagnostic would print it; one that
 // would name the value names the reference instead.
 func TestLoad_never_shows_a_value_expanded_from_the_environment(t *testing.T) {
-	t.Setenv("GITHUB_TOKEN", "test-token")
+	t.Parallel()
 	const ref = "${FORGE_SCOUT_SECRET}"
 	conn := func(name, fields string) string {
 		return "  - name: " + name + "\n    url: https://github.com\n    token: ${GITHUB_TOKEN}\n" + fields
@@ -734,8 +737,8 @@ func TestLoad_never_shows_a_value_expanded_from_the_environment(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("FORGE_SCOUT_SECRET", tc.secret)
-			_, warns, err := Load(writeConfig(t, tc.doc))
+			t.Parallel()
+			_, warns, err := load(writeConfig(t, tc.doc), env(map[string]string{"GITHUB_TOKEN": "test-token", "FORGE_SCOUT_SECRET": tc.secret}))
 			var said []string
 			if err != nil {
 				said = append(said, err.Error())
