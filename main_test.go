@@ -798,10 +798,9 @@ func TestRunTrigger_every_accepted_log_level_keeps_the_scan_heartbeat(t *testing
 	}
 	for _, tc := range tests {
 		t.Run(tc.level, func(t *testing.T) {
-			capture.Default(t)
 			var out bytes.Buffer
 			h, level := slogx.NewHandler(slogx.Options{Format: slogx.JSON, Output: &out})
-			slog.SetDefault(slog.New(h))
+			capture.SwapDefault(t, slog.New(h))
 			gh := forgeconntest.New(forgeconntest.GitHub, world("acme"))
 			t.Cleanup(gh.Close)
 			t.Setenv("FORGE_SCOUT_TEST_TOKEN", "test-token")
