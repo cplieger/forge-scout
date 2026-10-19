@@ -6,8 +6,8 @@ github.com/cplieger/forgeapi v1.4.0-dev.7 h1:SsxyVnCBSFBQTBv1XtD8UwsLaC06I82f3vk
 github.com/cplieger/forgeapi v1.4.0-dev.7/go.mod h1:yJJ1N/WkRhQ5LiqGyx8XgwQDbxg/4cmdIoqQ1gDCHxU=
 github.com/cplieger/health v1.8.2 h1:diGNLq2UwTYpprTMJg0Dc5sd5l4Ec1wNFk1Ri8vaEGQ=
 github.com/cplieger/health v1.8.2/go.mod h1:uiQm1zh3/7TGZffTX9W0p+GRTbVXfEM9POyWe1Rf0PU=
-github.com/cplieger/httpx/v5 v5.1.0-dev.1 h1:EwaPAKtB+LKSW+hFxc8PZthAdRS21mYzDLzy8YQvlo8=
-github.com/cplieger/httpx/v5 v5.1.0-dev.1/go.mod h1:+oL1fPTCSNuzy7HZEC2eCSirL+D3fh/AblvN/nQPSt0=
+github.com/cplieger/httpx/v5 v5.1.0-dev.2 h1:WDqizpth0NZHNE9nxAKmbVZPMGVty4uWwKerBge9BME=
+github.com/cplieger/httpx/v5 v5.1.0-dev.2/go.mod h1:+oL1fPTCSNuzy7HZEC2eCSirL+D3fh/AblvN/nQPSt0=
 github.com/cplieger/jsoncap/v2 v2.0.3 h1:KrXnATaR6XE/cRmNqOwawm7jnCCCVQBhveqV39d2Ajc=
 github.com/cplieger/jsoncap/v2 v2.0.3/go.mod h1:HKuj6+CrcJf5oHAJ8Sfnxv7Ip790NBWwCFtwVC9GR8Q=
 github.com/cplieger/runesafe/v3 v3.1.0-dev.1 h1:vMd+tU7kdH5WsC/OdPV/+QqMygMrFsl2byY/dXO/KkQ=
