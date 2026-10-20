@@ -70,6 +70,12 @@ func webURL(s string) bool {
 	return err == nil && u.Host != "" && (strings.EqualFold(u.Scheme, "https") || strings.EqualFold(u.Scheme, "http"))
 }
 
+func (l *lineAttrs) workflowPath(path string) {
+	if path != "" {
+		l.text("workflow_path", path)
+	}
+}
+
 // done is the line's attributes, ending in truncated when a value was cut.
 func (l *lineAttrs) done() []slog.Attr {
 	if len(l.cut) > 0 {
@@ -87,6 +93,7 @@ func emitRun(out emitter, log *slog.Logger, run *forge.Run, previous forge.RunSt
 		l.add(slog.String("previous_state", string(previous)))
 	}
 	l.text("workflow", run.Workflow)
+	l.workflowPath(run.WorkflowPath)
 	l.text("branch", run.Branch)
 	l.add(slog.Bool("default_branch", isDefault), slog.String("trigger", run.Trigger),
 		slog.Int64("run_id", run.ID), slog.Int64("run_number", run.Number))
@@ -245,6 +252,7 @@ func emitFailing(sc *scan, row ranked[failingRow]) {
 	l := snapshotAttrs(sc, row)
 	l.text("repo", f.repo)
 	l.text("workflow", f.name)
+	l.workflowPath(f.path)
 	l.text("branch", f.branch)
 	l.add(slog.String("state", state), slog.Int64("run_id", f.runID))
 	l.link(f.url)
@@ -258,6 +266,7 @@ func emitSlow(sc *scan, row ranked[slowRow]) {
 	l := snapshotAttrs(sc, row)
 	l.text("repo", s.repo)
 	l.text("workflow", s.name)
+	l.workflowPath(s.path)
 	l.add(slog.Int("runs", s.runs),
 		slog.Int64("p50_seconds", int64(s.p50/time.Second)), slog.Int64("p95_seconds", int64(s.p95/time.Second)))
 	l.link(s.url)

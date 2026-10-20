@@ -4,6 +4,7 @@
 package forge
 
 import (
+	"cmp"
 	"errors"
 	"strings"
 	"time"
@@ -93,8 +94,13 @@ type Run struct {
 	StartedAt time.Time
 	UpdatedAt time.Time
 	Repo      string
-	Workflow  string
-	Branch    string
+	// Workflow is the workflow's display name, which can differ between its
+	// runs, as a GitHub run-name title does.
+	Workflow string
+	// WorkflowPath is the path of the workflow definition the run ran, the
+	// same on every run of it; empty where the forge names none (GitLab).
+	WorkflowPath string
+	Branch       string
 	// Trigger is the normalized trigger spelling: push, pull_request,
 	// schedule, manual, other or unknown.
 	Trigger string
@@ -105,6 +111,10 @@ type Run struct {
 	ID     int64
 	Number int64
 }
+
+// WorkflowID is the identity every run of r's workflow shares: its path, or
+// the run's name where the forge names no definition.
+func (r *Run) WorkflowID() string { return cmp.Or(r.WorkflowPath, r.Workflow) }
 
 // Duration is r's wall time, known only where the product sent a start time
 // no later than the last update.

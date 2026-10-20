@@ -39,7 +39,7 @@ func world(owner string) forgeconntest.World {
 			Alerts: []forgeconntest.Alert{{Number: 1, Rule: "go/x", Severity: "high", Tool: "CodeQL", Created: t0}},
 			Workflows: []forgeconntest.Workflow{
 				{ID: 1, Name: "nightly", Path: ".github/workflows/n.yml", State: "disabled_inactivity"},
-				{ID: 2, Name: "ci", Path: ".github/workflows/ci.yml", State: "active"},
+				{ID: 2, Name: "ci", Path: ".github/workflows/ci.yaml", State: "active"},
 			},
 		}},
 	}

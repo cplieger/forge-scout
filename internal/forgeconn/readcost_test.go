@@ -160,6 +160,9 @@ func TestWire_a_document_is_charged_the_points_its_forge_reports(t *testing.T) {
 func TestWire_a_deferred_read_carries_the_budget_that_held_it(t *testing.T) {
 	c, srv := openMetered(t, forgeconntest.GitLab, world(), new(spend.Meter))
 	reset := wireNow.Add(2 * time.Hour)
+	if _, err := c.OpenPRs(t.Context(), "acme"); err != nil {
+		t.Fatalf("Setup: OpenPRs = %v: a first read places its operation on the pool it draws on", err)
+	}
 	srv.SetBudget(forge.ReadReserve-10, reset)
 	if _, err := c.Discover(t.Context(), []string{"acme"}); err != nil {
 		t.Fatalf("Setup: Discover = %v", err)

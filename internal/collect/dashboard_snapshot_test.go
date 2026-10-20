@@ -44,10 +44,10 @@ var snapshotLabels = map[string][]string{
 	"open issue":        {"connection", "forge", "repo", "number", "ref", "title", "author", "from", "tags", "url", "created_at", "updated_at", "link", "item"},
 	// A failing workflow's url and run_id are its newest failed run, which
 	// changes only with a new failure.
-	"failing workflow": {"connection", "forge", "repo", "workflow", "branch", "state", "run_id", "url", "last_run_at", "failing_since", "failing_since_clipped", "link"},
+	"failing workflow": {"connection", "forge", "repo", "workflow", "workflow_path", "branch", "state", "run_id", "url", "last_run_at", "failing_since", "failing_since_clipped", "link"},
 	// A slow workflow's url is its slowest run, which changes as the window
 	// slides, so it is not a label.
-	"slow workflow":      {"connection", "forge", "repo", "workflow"},
+	"slow workflow":      {"connection", "forge", "repo", "workflow", "workflow_path"},
 	"disabled workflow":  {"connection", "forge", "repo", "workflow", "path", "state", "url", "link"},
 	"security alert":     {"connection", "forge", "repo", "number", "severity", "rule", "tool", "url", "created_at", "link"},
 	"top security alert": {"connection", "forge", "repo", "number", "severity", "rule", "tool", "url", "created_at", "link"},
@@ -62,8 +62,8 @@ var snapshotLabels = map[string][]string{
 var snapshotIdentity = map[string][]string{
 	"open pull request":  {"connection", "forge", "repo", "number"},
 	"open issue":         {"connection", "forge", "repo", "number"},
-	"failing workflow":   {"connection", "forge", "repo", "workflow", "branch"},
-	"slow workflow":      {"connection", "forge", "repo", "workflow"},
+	"failing workflow":   {"connection", "forge", "repo", "workflow", "workflow_path", "branch"},
+	"slow workflow":      {"connection", "forge", "repo", "workflow", "workflow_path"},
 	"disabled workflow":  {"connection", "forge", "repo", "workflow", "path"},
 	"security alert":     {"connection", "forge", "repo", "number"},
 	"top security alert": {"connection", "forge", "repo", "number"},
@@ -526,7 +526,7 @@ func worldItems(ep *endpoint, start, at time.Time) {
 		id := created.Unix() / 60
 		failing := run(id, forge.RunFailing, created)
 		passing := run(id+5, forge.RunPassing, created.Add(time.Minute))
-		passing.Workflow, passing.UpdatedAt = "Build", passing.StartedAt.Add(time.Duration(4+k)*time.Minute)
+		passing.Workflow, passing.WorkflowPath, passing.UpdatedAt = "Build", pathOf("Build"), passing.StartedAt.Add(time.Duration(4+k)*time.Minute)
 		runs = append(runs, failing, passing)
 	}
 	ep.conn.runs = map[string]listing{"o/r": {Runs: runs}}
@@ -546,8 +546,8 @@ func worldItems(ep *endpoint, start, at time.Time) {
 	}
 	ep.gh.alerts = map[string][]forge.Alert{"o/r": alerts}
 	ep.gh.workflows = map[string][]forge.Workflow{"o/r": {
-		{Repo: "o/r", Name: "CI", State: "active"},
-		{Repo: "o/r", Name: "Build", State: "active"},
+		{Repo: "o/r", Name: "CI", Path: ciPath, State: "active"},
+		{Repo: "o/r", Name: "Build", Path: pathOf("Build"), State: "active"},
 		{Repo: "o/r", Name: "nightly", Path: ".github/workflows/nightly.yaml", State: "disabled_inactivity", URL: "https://gh.test/o/r/actions/workflows/nightly.yaml"},
 	}}
 }
