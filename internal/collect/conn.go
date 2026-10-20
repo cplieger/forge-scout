@@ -54,6 +54,9 @@ type connResult struct {
 	// defined is the workflow definitions of each repository GitHub listed
 	// whole, by lowercased path.
 	defined map[string]*definitions
+	// workflowNames is each listed definition's name, by lowercased
+	// repository path then workflow path, from any workflows listing.
+	workflowNames map[string]map[string]string
 	// keptWhole is the repositories a complete discovery kept, by path, empty
 	// when every owner resolved and listed none; nil when discovery was cut
 	// short, failed or left an owner unresolved.
@@ -115,7 +118,7 @@ var errStopped = errors.New("connection scan stopped")
 func (c *Collector) scanConn(ctx context.Context, sc *scan, cs *connState) *connResult {
 	r := &connResult{
 		cfg: &cs.cfg, kept: map[string]forge.Repo{}, dropped: map[string]bool{}, byOwner: map[string][]forge.Repo{},
-		defined: map[string]*definitions{}, seen: map[string]bool{}, unmapped: map[string]bool{},
+		defined: map[string]*definitions{}, workflowNames: map[string]map[string]string{}, seen: map[string]bool{}, unmapped: map[string]bool{},
 		budget: forge.Budget{Remaining: -1}, phase: phaseOpen, book: newRequestBook(cs.spent),
 	}
 	r.log = Scope(c.logger, forge.ProductUnknown, cs.cfg.Name)
@@ -230,9 +233,10 @@ func (r *connResult) approve() {
 	for i := range r.workflowLists {
 		r.approveWorkflows(&r.workflowLists[i], keepDisabled)
 	}
+	r.nameRuns()
 }
 
-// definitions is one repository's workflow names, as a whole listing gave
+// definitions is one repository's workflow paths, as a whole listing gave
 // them.
 type definitions struct {
 	live, deleted map[string]bool
@@ -240,34 +244,59 @@ type definitions struct {
 }
 
 // approveWorkflows keeps l's disabled workflows when the family publishes,
-// and the names l defines when it was read whole.
+// the name of each definition l lists, and the paths l defines when it was
+// read whole.
 func (r *connResult) approveWorkflows(l *workflowListing, keepDisabled bool) {
 	var defs *definitions
 	if l.whole {
 		defs = &definitions{live: map[string]bool{}, deleted: map[string]bool{}, path: l.repo.Path}
 		r.defined[strings.ToLower(l.repo.Path)] = defs
 	}
+	names := map[string]string{}
+	r.workflowNames[strings.ToLower(l.repo.Path)] = names
 	for j := range l.defs {
 		w := &l.defs[j]
 		if keepDisabled && w.Disabled() {
 			r.disabled = append(r.disabled, *w)
 		}
+		if w.Path != "" && w.Name != "" {
+			names[w.Path] = w.Name
+		}
 		switch {
 		case defs == nil:
 		case w.Deleted():
-			defs.deleted[w.Name] = true
+			defs.deleted[w.Path] = true
 		default:
-			defs.live[w.Name] = true
+			defs.live[w.Path] = true
 		}
 	}
 }
 
+// nameRuns gives each listed run its definition's name where a workflows
+// listing of its repository named its path: a GitHub run's own name is its
+// run-name title.
+func (r *connResult) nameRuns() {
+	for i := range r.runLists {
+		l := &r.runLists[i]
+		names := r.workflowNames[strings.ToLower(l.repo.Path)]
+		for j := range l.runs {
+			if name, ok := names[l.runs[j].WorkflowPath]; ok {
+				l.runs[j].Workflow = name
+			}
+		}
+	}
+}
+
+// workflowName is the name of repo's workflow at path a workflows listing
+// gave this scan, empty when none did.
+func (r *connResult) workflowName(repo, path string) string {
+	return r.workflowNames[strings.ToLower(repo)][path]
+}
+
 // gone reports a workflow d proves removed: listed deleted, or absent from
-// it after an earlier whole listing named it. A run's name need not be its
-// definition's (GitHub's dynamic workflows title each run), so a name never
-// listed is never gone by absence.
-func (d *definitions) gone(name string, listedBefore bool) bool {
-	return !d.live[name] && (d.deleted[name] || listedBefore)
+// it after an earlier whole listing named it.
+func (d *definitions) gone(path string, listedBefore bool) bool {
+	return !d.live[path] && (d.deleted[path] || listedBefore)
 }
 
 // verdict is the row's checks field: unknown unless its read was whole, as

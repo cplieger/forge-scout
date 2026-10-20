@@ -159,7 +159,7 @@ func TestRunsSince_maps_completed_runs_sets_unmapped_ones_apart_and_dates_the_ol
 		sent = settings(t, opts)
 		return forgeapi.Page[forgeapi.Run]{Items: []forgeapi.Run{
 			{
-				Ref: forgeapi.RunRef{ID: 11, Number: 3}, Name: "CI", Branch: "main", WebURL: "u", CreatedAt: created,
+				Ref: forgeapi.RunRef{ID: 11, Number: 3}, Name: "CI nightly", WorkflowPath: ".github/workflows/ci.yaml", Branch: "main", WebURL: "u", CreatedAt: created,
 				StartedAt: created.Add(time.Minute), UpdatedAt: created.Add(9 * time.Minute), State: forgeapi.CheckFailing, Trigger: forgeapi.TriggerSchedule,
 			},
 			{Ref: forgeapi.RunRef{ID: 12, Number: 4}, Name: "CI", Branch: "main", WebURL: "p", CreatedAt: created.Add(-time.Minute), State: forgeapi.CheckPending},
@@ -181,7 +181,7 @@ func TestRunsSince_maps_completed_runs_sets_unmapped_ones_apart_and_dates_the_ol
 	}
 	want := forge.Run{
 		CreatedAt: created, StartedAt: created.Add(time.Minute), UpdatedAt: created.Add(9 * time.Minute), Repo: "o/r",
-		Workflow: "CI", Branch: "main", Trigger: "schedule", URL: "u", State: forge.RunFailing, ID: 11, Number: 3,
+		Workflow: "CI nightly", WorkflowPath: ".github/workflows/ci.yaml", Branch: "main", Trigger: "schedule", URL: "u", State: forge.RunFailing, ID: 11, Number: 3,
 	}
 	if list.Rows[0] != want {
 		t.Errorf("RunsSince row = %+v, want %+v", list.Rows[0], want)

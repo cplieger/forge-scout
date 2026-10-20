@@ -199,7 +199,7 @@ func TestDays_round_trip_through_the_file(t *testing.T) {
 
 func TestLoad_sets_aside_a_file_holding_a_day_the_store_never_writes(t *testing.T) {
 	days := func(day string) string {
-		return `{"version":2,"connections":{"gh":{"delivered":{},"verdicts":{},"days":{"o/r":` + day + `}}}}`
+		return `{"version":2,"connections":{"gh":{"delivered":{},"workflow_verdicts":{},"days":{"o/r":` + day + `}}}}`
 	}
 	for name, body := range map[string]string{
 		"not_a_date":      days(`{"2026-10-1":{"runs":{"1":{"state":"passing"}}}}`),

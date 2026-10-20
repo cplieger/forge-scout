@@ -49,6 +49,7 @@ type failingRow struct {
 	last   time.Time
 	repo   string
 	name   string
+	path   string
 	branch string
 	url    string
 	runID  int64
@@ -64,6 +65,7 @@ type failingRow struct {
 type slowRow struct {
 	repo     string
 	name     string
+	path     string
 	url      string
 	runs     int
 	p50, p95 time.Duration
@@ -99,11 +101,12 @@ func (*Collector) derive(sc *scan, r *connResult) {
 		if !ok || w.State != forge.RunFailing || k.Branch != l.repo.DefaultBranch {
 			continue
 		}
-		if d, defined := r.defined[key]; defined && d.gone(k.Name, w.Defined) {
+		if d, defined := r.defined[key]; defined && d.gone(k.Workflow, w.Defined) {
 			continue
 		}
 		r.failing = append(r.failing, failingRow{
-			since: w.Since, last: w.Last, repo: k.Repo, name: k.Name, branch: k.Branch, url: w.URL,
+			since: w.Since, last: w.Last, repo: k.Repo, name: cmp.Or(r.workflowName(k.Repo, w.Path), w.Name, k.Workflow),
+			path: w.Path, branch: k.Branch, url: w.URL,
 			runID: w.RunID, streak: w.Streak, clipped: w.Clipped, unknown: !runstate.Vouched(l.cut, l.cover, w.Last),
 		})
 	}
@@ -118,6 +121,8 @@ func onDefault(repo forge.Repo, branch, trigger string) bool {
 
 type timed struct {
 	created time.Time
+	name    string
+	path    string
 	url     string
 	id      int64
 	d       time.Duration
@@ -125,8 +130,8 @@ type timed struct {
 
 // slowWorkflows is each workflow's run time percentiles over its timed
 // runs this scan listed whole on the repository's current default branch,
-// for workflows with enough of them: a cut listing's newest rows are no
-// sample of the window.
+// for workflows with enough of them, each named as its newest run. A cut
+// listing's newest rows are no sample of the window.
 func slowWorkflows(r *connResult) (rows []slowRow, known int) {
 	byWorkflow := map[[2]string][]timed{}
 	for i := range r.runLists {
@@ -141,8 +146,10 @@ func slowWorkflows(r *connResult) (rows []slowRow, known int) {
 				continue
 			}
 			known++
-			key := [2]string{run.Repo, run.Workflow}
-			byWorkflow[key] = append(byWorkflow[key], timed{created: run.CreatedAt, url: run.URL, id: run.ID, d: d})
+			key := [2]string{run.Repo, run.WorkflowID()}
+			byWorkflow[key] = append(byWorkflow[key], timed{
+				created: run.CreatedAt, name: run.Workflow, path: run.WorkflowPath, url: run.URL, id: run.ID, d: d,
+			})
 		}
 	}
 	for key, runs := range byWorkflow {
@@ -156,7 +163,7 @@ func slowWorkflows(r *connResult) (rows []slowRow, known int) {
 		}
 		slices.Sort(ds)
 		rows = append(rows, slowRow{
-			repo: key[0], name: key[1], url: newest.url, runs: len(ds),
+			repo: key[0], name: newest.name, path: newest.path, url: newest.url, runs: len(ds),
 			p50: nearestRank(ds, 50), p95: nearestRank(ds, 95),
 		})
 	}
@@ -321,11 +328,11 @@ func lessIssue(a, b *issueRow) int {
 }
 
 func lessFailing(a, b *failingRow) int {
-	return cmp.Or(a.since.Compare(b.since), cmp.Compare(a.repo, b.repo), cmp.Compare(a.name, b.name))
+	return cmp.Or(a.since.Compare(b.since), cmp.Compare(a.repo, b.repo), cmp.Compare(a.name, b.name), cmp.Compare(a.path, b.path))
 }
 
 func lessSlow(a, b *slowRow) int {
-	return cmp.Or(cmp.Compare(b.p95, a.p95), cmp.Compare(a.repo, b.repo), cmp.Compare(a.name, b.name))
+	return cmp.Or(cmp.Compare(b.p95, a.p95), cmp.Compare(a.repo, b.repo), cmp.Compare(a.name, b.name), cmp.Compare(a.path, b.path))
 }
 
 // lessDay orders day rows newest day first, then by repository.

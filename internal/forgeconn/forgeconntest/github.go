@@ -2,6 +2,7 @@
 package forgeconntest
 
 import (
+	"cmp"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -109,7 +110,7 @@ func (s *Server) githubRuns(w http.ResponseWriter, r *http.Request, repo *Repo) 
 			run := &runs[i]
 			status, conclusion := githubConclusion(run.Outcome)
 			rows = append(rows, map[string]any{
-				"id": run.ID, "run_number": run.Number, "event": run.Event, "name": run.Workflow,
+				"id": run.ID, "run_number": run.Number, "event": run.Event, "name": cmp.Or(run.Title, run.Workflow), "path": run.githubPath(),
 				"head_branch": run.Branch, "head_sha": "0000000000000000000000000000000000000001",
 				"status": status, "conclusion": conclusion,
 				"html_url":   webURL(s.URL, s.fullName(repo)+"/actions/runs/"+itoa(int(run.ID))),
@@ -119,6 +120,10 @@ func (s *Server) githubRuns(w http.ResponseWriter, r *http.Request, repo *Repo) 
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"total_count": len(runs), "workflow_runs": rows})
+}
+
+func (r *Run) githubPath() string {
+	return cmp.Or(r.Path, ".github/workflows/"+r.Workflow+".yaml")
 }
 
 func (s *Server) githubWorkflows(w http.ResponseWriter, r *http.Request, repo *Repo) {

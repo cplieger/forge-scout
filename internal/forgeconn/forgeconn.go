@@ -638,7 +638,7 @@ func runOf(r *forgeapi.Run, repo string) (forge.Run, bool) {
 func unstated(r *forgeapi.Run, repo string) forge.Run {
 	return forge.Run{
 		CreatedAt: r.CreatedAt, StartedAt: r.StartedAt, UpdatedAt: r.UpdatedAt, Repo: repo,
-		Workflow: r.Name, Branch: r.Branch, Trigger: r.Trigger.String(), URL: r.WebURL,
+		Workflow: r.Name, WorkflowPath: r.WorkflowPath, Branch: r.Branch, Trigger: r.Trigger.String(), URL: r.WebURL,
 		ID: r.Ref.ID, Number: r.Ref.Number,
 	}
 }

@@ -157,7 +157,7 @@ func TestScan_slow_workflow_links_the_newest_run_on_a_creation_time_tie(t *testi
 // set, is the listing the first scan reads; else it defines CI.
 func TestScan_a_workflow_a_whole_github_listing_no_longer_defines_leaves_the_failing_set(t *testing.T) {
 	dynamic := func(gh *fakeGitHub) {
-		gh.workflows = map[string][]forge.Workflow{"o/r": {{Repo: "o/r", Name: "CodeQL - Code Quality", State: "active"}}}
+		gh.workflows = map[string][]forge.Workflow{"o/r": {{Repo: "o/r", Name: "CodeQL - Code Quality", Path: "dynamic/github-code-quality/codeql", State: "active"}}}
 	}
 	tests := []struct {
 		first   func(gh *fakeGitHub)
@@ -165,24 +165,24 @@ func TestScan_a_workflow_a_whole_github_listing_no_longer_defines_leaves_the_fai
 		name    string
 		failing bool
 	}{
-		{name: "never_listed_under_its_run_name", failing: true, first: dynamic, setup: dynamic},
+		{name: "never_listed", failing: true, first: dynamic, setup: dynamic},
 		{name: "never_listed_then_deleted", first: dynamic, setup: func(gh *fakeGitHub) {
-			gh.workflows = map[string][]forge.Workflow{"o/r": {{Repo: "o/r", Name: "CI", State: "deleted"}}}
+			gh.workflows = map[string][]forge.Workflow{"o/r": {{Repo: "o/r", Name: "CI", Path: ciPath, State: "deleted"}}}
 		}},
 		{name: "renamed", setup: func(gh *fakeGitHub) {
-			gh.workflows = map[string][]forge.Workflow{"o/r": {{Repo: "o/r", Name: "Build", State: "active"}}}
+			gh.workflows = map[string][]forge.Workflow{"o/r": {{Repo: "o/r", Name: "Build", Path: ".github/workflows/build.yaml", State: "active"}}}
 		}},
 		{name: "deleted_state", setup: func(gh *fakeGitHub) {
-			gh.workflows = map[string][]forge.Workflow{"o/r": {{Repo: "o/r", Name: "CI", State: "deleted"}}}
+			gh.workflows = map[string][]forge.Workflow{"o/r": {{Repo: "o/r", Name: "CI", Path: ciPath, State: "deleted"}}}
 		}},
 		{name: "no_workflows_left", setup: func(gh *fakeGitHub) {
 			gh.workflows = map[string][]forge.Workflow{"o/r": {}}
 		}},
 		{name: "still_defined", failing: true, setup: func(gh *fakeGitHub) {
-			gh.workflows = map[string][]forge.Workflow{"o/r": {{Repo: "o/r", Name: "CI", State: "disabled_manually"}}}
+			gh.workflows = map[string][]forge.Workflow{"o/r": {{Repo: "o/r", Name: "CI", Path: ciPath, State: "disabled_manually"}}}
 		}},
 		{name: "listing_cut", failing: true, setup: func(gh *fakeGitHub) {
-			gh.workflows = map[string][]forge.Workflow{"o/r": {{Repo: "o/r", Name: "Build", State: "active"}}}
+			gh.workflows = map[string][]forge.Workflow{"o/r": {{Repo: "o/r", Name: "Build", Path: ".github/workflows/build.yaml", State: "active"}}}
 			gh.truncated = map[string]bool{"workflows o/r": true}
 		}},
 		{name: "listing_failed", failing: true, setup: func(gh *fakeGitHub) {
@@ -215,17 +215,17 @@ func TestScan_a_workflow_a_whole_github_listing_no_longer_defines_leaves_the_fai
 }
 
 // TestScan_a_workflow_a_whole_listing_once_named_deleted_stays_gone_after_its_row_leaves
-// stores a failing CI on main whose name no active definition matches, then
-// lists CI deleted, then lists no CI row at all; a dynamic workflow's name
-// that no listing ever names stays failing throughout.
+// stores a failing CI on main whose path no active definition lists, then
+// lists CI deleted, then lists no CI row at all; a path no listing ever
+// names stays failing throughout.
 func TestScan_a_workflow_a_whole_listing_once_named_deleted_stays_gone_after_its_row_leaves(t *testing.T) {
-	dynamic := forge.Workflow{Repo: "o/r", Name: "CodeQL - Code Quality", State: "active"}
+	dynamic := forge.Workflow{Repo: "o/r", Name: "CodeQL - Code Quality", Path: "dynamic/github-code-quality/codeql", State: "active"}
 	tests := []struct {
 		name    string
 		second  []forge.Workflow
 		failing bool
 	}{
-		{name: "deleted_then_absent", second: []forge.Workflow{dynamic, {Repo: "o/r", Name: "CI", State: "deleted"}}},
+		{name: "deleted_then_absent", second: []forge.Workflow{dynamic, {Repo: "o/r", Name: "CI", Path: ciPath, State: "deleted"}}},
 		{name: "never_named", second: []forge.Workflow{dynamic}, failing: true},
 	}
 	for _, tc := range tests {
@@ -246,6 +246,25 @@ func TestScan_a_workflow_a_whole_listing_once_named_deleted_stays_gone_after_its
 				t.Errorf("%s: third scan failing workflow lines = %v, want CI failing %t", tc.name, got, tc.failing)
 			}
 		})
+	}
+}
+
+func TestScan_a_stored_failure_takes_the_name_its_definition_is_listed_under_now(t *testing.T) {
+	dynamic := forge.Workflow{Repo: "o/r", Name: "CodeQL - Code Quality", Path: "dynamic/github-code-quality/codeql", State: "active"}
+	ep := githubEndpoint("gh")
+	ep.conn.runs = map[string]listing{"o/r": {Runs: []forge.Run{run(1, forge.RunFailing, now.Add(-time.Hour))}}}
+	ep.gh.workflows = map[string][]forge.Workflow{"o/r": {dynamic}}
+	h := newHarness(t, ep)
+	h.scan(t)
+	if l := lineFor(t, h.rec, "failing workflow", "gh"); l["workflow"] != "CI" {
+		t.Fatalf("Setup: failing workflow = %v, want it named CI, its run's own name", l)
+	}
+	ep.conn.runs["o/r"] = listing{}
+	ep.gh.workflows["o/r"] = []forge.Workflow{dynamic, {Repo: "o/r", Name: "CI renamed", Path: ciPath, State: "active"}}
+	*h.clock = now.Add(15 * time.Minute)
+	h.scan(t)
+	if l := lineFor(t, h.rec, "failing workflow", "gh"); l["workflow"] != "CI renamed" || l["workflow_path"] != ciPath {
+		t.Errorf("failing workflow = %v, want workflow CI renamed at %s: the listing names the definition now", l, ciPath)
 	}
 }
 

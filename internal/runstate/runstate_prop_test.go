@@ -225,7 +225,7 @@ func (m *model) check(t *testing.T, s *Store, l *Listing, seed uint64, step int)
 	oracle, real := m.newest(listed, done), m.newest(m.real(), done)
 	got := map[string]WorkflowState{}
 	for k, w := range s.Workflows("gh") {
-		got[k.Name] = w
+		got[k.Workflow] = *w
 	}
 	for wf, n := range oracle {
 		if w, ok := got[wf]; !ok || w.RunID != n.id || w.State != n.state {

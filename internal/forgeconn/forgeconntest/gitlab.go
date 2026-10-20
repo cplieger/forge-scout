@@ -2,6 +2,7 @@
 package forgeconntest
 
 import (
+	"cmp"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -26,12 +27,25 @@ func gitlabStatus(outcome string) string {
 	}
 }
 
+func (s *Server) throttle() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.projectsThrottle
+}
+
 func (s *Server) serveGitLab(w http.ResponseWriter, r *http.Request, line string) (string, bool) {
 	h := w.Header()
 	h.Set("X-Gitlab-Meta", `{"correlation_id":"fake-correlation","version":"1"}`)
 	remaining, reset := s.budget()
+	h.Set("RateLimit-Name", "throttle_authenticated_api")
+	h.Set("RateLimit-Limit", "2000")
 	h.Set("RateLimit-Remaining", itoa(remaining))
 	h.Set("RateLimit-Reset", itoa(int(reset.Unix())))
+	if limit := s.throttle(); limit > 0 && strings.HasSuffix(r.URL.Path, "/projects") {
+		h.Set("RateLimit-Name", "burst_traffic_per_user_free_plan")
+		h.Set("RateLimit-Limit", itoa(limit))
+		h.Set("RateLimit-Remaining", itoa(limit-1))
+	}
 	if r.Method == http.MethodPost && r.URL.Path == "/api/graphql" {
 		return s.serveGitLabGraphQL(w, r)
 	}
@@ -238,7 +252,7 @@ func (s *Server) gitlabPipelines(r *http.Request, repo *Repo) []map[string]any {
 	for i := range runs {
 		run := &runs[i]
 		rows = append(rows, map[string]any{
-			"id": run.ID, "iid": run.Number, "project_id": 1, "name": run.Workflow, "ref": run.Branch,
+			"id": run.ID, "iid": run.Number, "project_id": 1, "name": cmp.Or(run.Title, run.Workflow), "ref": run.Branch,
 			"sha": "0000000000000000000000000000000000000001", "status": gitlabStatus(run.Outcome), "source": run.Event,
 			"created_at": stamp(run.Created), "updated_at": stamp(run.Updated),
 			"web_url": webURL(s.URL, s.fullName(repo)+"/-/pipelines/"+itoa(int(run.ID))),
