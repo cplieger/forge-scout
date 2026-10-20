@@ -5,7 +5,7 @@ go 1.27.3
 require (
 	github.com/cplieger/atomicfile/v4 v4.2.0-dev.1
 	github.com/cplieger/envx/yamlenv/v2 v2.2.0-dev.1
-	github.com/cplieger/forgeapi v1.4.0-dev.13
+	github.com/cplieger/forgeapi v1.4.0-dev.14
 	github.com/cplieger/health v1.10.0-dev.1
 	github.com/cplieger/httpx/v5 v5.2.0-dev.1
 	github.com/cplieger/jsoncap/v2 v2.1.0-dev.1
