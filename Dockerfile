@@ -15,7 +15,7 @@ COPY LICENSE NOTICE THIRD_PARTY_NOTICES.md ./
 COPY scripts/collect-licenses.sh scripts/
 RUN sh scripts/collect-licenses.sh --name forge-scout .
 
-FROM gcr.io/distroless/static-debian13:nonroot@sha256:e2e927ec666bae08560abb3c55d0659eceabb657f56b6782ab500a9fc7f555e3
+FROM gcr.io/distroless/static-debian13:nonroot@sha256:516757106de35205efb70b91ba03f6f1298424a0678c603255cf2852a7000087
 
 COPY --chmod=755 --from=builder /forge-scout /forge-scout
 COPY --chown=65532:65532 --from=builder /out/data /data
