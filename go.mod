@@ -13,7 +13,7 @@ require (
 	github.com/cplieger/scheduler/v4 v4.3.0
 	github.com/cplieger/slogx v1.8.0
 	github.com/cplieger/ssrf/v4 v4.5.0-dev.6
-	go.yaml.in/yaml/v3 v3.0.5
+	go.yaml.in/yaml/v3 v3.0.6
 )
 
 require github.com/cplieger/urlform v1.5.0 // indirect
