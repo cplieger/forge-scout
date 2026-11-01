@@ -256,6 +256,7 @@ func TestScan_a_cut_run_listing_judges_what_it_read_and_vouches_for_nothing_olde
 	}
 	deploy := run(3, forge.RunPassing, now.Add(20*time.Minute))
 	deploy.Workflow = "Deploy"
+	deploy.WorkflowPath = pathOf(deploy.Workflow)
 	ep.conn.runs["o/r"] = listing{Runs: []forge.Run{deploy}, Truncated: true}
 	*h.clock = now.Add(30 * time.Minute)
 	h.scan(t)

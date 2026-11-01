@@ -54,9 +54,9 @@ type fakeConn struct {
 	budgetAfter map[string]forge.Budget
 	// since is the bound each repository's last run listing asked for.
 	since map[string]time.Time
-	// ran is the workflow names each repository's run listings answered,
-	// which a GitHub workflow listing defines unless the test says otherwise.
-	ran map[string][]string
+	// ran is the workflows each repository's run listings answered, which a
+	// GitHub workflow listing defines unless the test says otherwise.
+	ran map[string][]forge.Workflow
 	// block, when set, runs before every read with the read's context and
 	// its "<op> <key>"; a non-nil error is the read's answer.
 	block func(ctx context.Context, call string) error
@@ -265,11 +265,12 @@ func (f *fakeConn) RunsSince(ctx context.Context, repo forge.Repo, since time.Ti
 		}
 	}
 	if f.ran == nil {
-		f.ran = map[string][]string{}
+		f.ran = map[string][]forge.Workflow{}
 	}
 	for _, r := range list.Rows {
-		if !slices.Contains(f.ran[repo.Path], r.Workflow) {
-			f.ran[repo.Path] = append(f.ran[repo.Path], r.Workflow)
+		def := forge.Workflow{Repo: repo.Path, Name: r.Workflow, Path: r.WorkflowPath, State: "active"}
+		if !slices.Contains(f.ran[repo.Path], def) {
+			f.ran[repo.Path] = append(f.ran[repo.Path], def)
 		}
 	}
 	return list, nil
@@ -358,9 +359,7 @@ func (g *fakeGitHub) Workflows(ctx context.Context, repo forge.Repo) (forge.List
 	}
 	defs, ok := g.workflows[repo.Path]
 	if !ok && g.conn != nil {
-		for _, name := range g.conn.ran[repo.Path] {
-			defs = append(defs, forge.Workflow{Repo: repo.Path, Name: name, State: "active"})
-		}
+		defs = append(defs, g.conn.ran[repo.Path]...)
 	}
 	return forge.Listing[forge.Workflow]{Rows: defs, End: ended(g.truncated["workflows "+repo.Path])}, nil
 }
@@ -554,9 +553,14 @@ func noLineFor(t *testing.T, rec *capture.Recorder, msg, connection string) {
 	}
 }
 
+const ciPath = ".github/workflows/ci.yaml"
+
+// pathOf("CI") must stay ciPath, the path run gives its runs.
+func pathOf(name string) string { return ".github/workflows/" + strings.ToLower(name) + ".yaml" }
+
 func run(id int64, state forge.RunState, created time.Time) forge.Run {
 	return forge.Run{
-		ID: id, Number: id, Repo: "o/r", Workflow: "CI", Branch: "main", Trigger: "push", State: state,
+		ID: id, Number: id, Repo: "o/r", Workflow: "CI", WorkflowPath: ciPath, Branch: "main", Trigger: "push", State: state,
 		URL: "https://forge.test/o/r/runs/" + strconv.FormatInt(id, 10), CreatedAt: created,
 		StartedAt: created.Add(10 * time.Second), UpdatedAt: created.Add(5 * time.Minute),
 	}
@@ -784,6 +788,7 @@ func TestScan_failing_workflows_are_capped_with_the_full_count(t *testing.T) {
 	for i := range 30 {
 		r := run(int64(i+1), forge.RunFailing, now.Add(-time.Duration(i+1)*time.Minute))
 		r.Workflow = fmt.Sprintf("wf-%02d", i)
+		r.WorkflowPath = pathOf(r.Workflow)
 		runs = append(runs, r)
 	}
 	ep.conn.runs = map[string]listing{"o/r": {Runs: runs}}
@@ -826,6 +831,7 @@ func TestScan_slow_workflows_need_three_timed_runs(t *testing.T) {
 	}
 	two := run(9, forge.RunPassing, now.Add(-time.Hour))
 	two.Workflow = "rare"
+	two.WorkflowPath = pathOf(two.Workflow)
 	runs = append(runs, two)
 	ep.conn.runs = map[string]listing{"o/r": {Runs: runs}}
 	h := newHarness(t, ep)
@@ -1393,6 +1399,7 @@ func TestScan_every_run_read_failing_emits_no_state_derived_rows(t *testing.T) {
 	for i := range 3 {
 		tr := run(int64(10+i), forge.RunPassing, now.Add(-time.Duration(i+2)*time.Hour))
 		tr.Workflow = "build"
+		tr.WorkflowPath = pathOf(tr.Workflow)
 		timedRuns = append(timedRuns, tr)
 	}
 	ep.conn.runs = map[string]listing{"o/r": {Runs: append([]forge.Run{r}, timedRuns...)}}
@@ -1427,6 +1434,7 @@ func TestScan_capped_families_keep_each_forges_first_rows(t *testing.T) {
 	for i := range 30 {
 		r := run(int64(i+1), forge.RunFailing, now.Add(-time.Duration(60-i)*time.Hour))
 		r.Workflow = fmt.Sprintf("wf-%02d", i)
+		r.WorkflowPath = pathOf(r.Workflow)
 		runs = append(runs, r)
 	}
 	gh.conn.runs = map[string]listing{"o/r": {Runs: runs}}

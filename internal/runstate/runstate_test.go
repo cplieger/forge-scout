@@ -119,10 +119,10 @@ func inRepo(r *forge.Run, repo string) *forge.Run {
 
 // verdictOf is the verdict of repo's workflow name on branch, ok false when
 // the store holds none.
-func verdictOf(wfs iter.Seq2[WorkflowKey, WorkflowState], repo, name, branch string) (WorkflowState, bool) {
+func verdictOf(wfs iter.Seq2[WorkflowKey, *WorkflowState], repo, name, branch string) (WorkflowState, bool) {
 	for k, w := range wfs {
-		if k == (WorkflowKey{Repo: repo, Name: name, Branch: branch}) {
-			return w, true
+		if k == (WorkflowKey{Repo: repo, Workflow: name, Branch: branch}) {
+			return *w, true
 		}
 	}
 	return WorkflowState{}, false
@@ -1087,7 +1087,7 @@ func stateWith(delivered, verdict, listed string) string {
 	if listed != "" {
 		l = `,"listed":{"o/r":` + listed + `}`
 	}
-	return `{"version":2,"connections":{"gh":{"delivered":{"o/r":{` + delivered + `}},"verdicts":{` + v + `}` + l + `}}}`
+	return `{"version":2,"connections":{"gh":{"delivered":{"o/r":{` + delivered + `}},"workflow_verdicts":{` + v + `}` + l + `}}}`
 }
 
 func TestLoad_accepts_entries_the_store_writes(t *testing.T) {
@@ -1114,7 +1114,7 @@ func TestLoad_sets_aside_a_file_it_cannot_use(t *testing.T) {
 		{"earlier_version", `{"version":1,"connections":{}}`},
 		{"wrong_version", `{"version":99,"connections":{}}`},
 		{"null", "null"},
-		{"verdict_not_keyed_by_branch", `{"version":2,"connections":{"gh":{"delivered":{},"verdicts":{"o/r":{"CI":` + goodVerdict + `}}}}}`},
+		{"verdict_not_keyed_by_branch", `{"version":2,"connections":{"gh":{"delivered":{},"workflow_verdicts":{"o/r":{"CI":` + goodVerdict + `}}}}}`},
 		{"run_key_not_an_id", stateWith(`"x1":`+goodDelivered, "", "")},
 		{"run_key_not_canonical", stateWith(`"01":`+goodDelivered, "", "")},
 		{"run_id_not_positive", stateWith(`"0":`+goodDelivered, "", "")},
@@ -1138,7 +1138,7 @@ func TestLoad_sets_aside_a_file_it_cannot_use(t *testing.T) {
 		{"failing_verdict_without_base_not_clipped", stateWith("", strings.Replace(goodVerdict, `,"base":{"since":"2026-09-30T12:00:00Z","count":1}`, "", 1), "")},
 		{"passing_verdict_with_malformed_base", stateWith("", strings.Replace(goodPassing, `"streak":{}`, `"streak":{},"base":{"count":1}`, 1), "")},
 		{"listed_at_no_time", stateWith("", "", `"0001-01-01T00:00:00Z"`)},
-		{"pending_at_no_time", `{"version":2,"connections":{"gh":{"delivered":{},"verdicts":{},"pending":{"o/r":"0001-01-01T00:00:00Z"}}}}`},
+		{"pending_at_no_time", `{"version":2,"connections":{"gh":{"delivered":{},"workflow_verdicts":{},"pending":{"o/r":"0001-01-01T00:00:00Z"}}}}`},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1208,7 +1208,7 @@ func TestLoad_an_over_cap_file_is_set_aside_and_the_next_commit_succeeds(t *test
 	maxStateBytes = 1024
 	t.Cleanup(func() { maxStateBytes = orig })
 	dir := t.TempDir()
-	body := `{"version":2,"connections":{"gh":{"delivered":{},"verdicts":{}}},"pad":"` + strings.Repeat("a", 1100) + `"}`
+	body := `{"version":2,"connections":{"gh":{"delivered":{},"workflow_verdicts":{}}},"pad":"` + strings.Repeat("a", 1100) + `"}`
 	if err := os.WriteFile(filepath.Join(dir, fileName), []byte(body), 0o600); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
@@ -1242,5 +1242,60 @@ func TestCleanupTemps_reclaims_an_abandoned_write(t *testing.T) {
 	}
 	if _, err := os.Stat(temp); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("abandoned temp %s still present (%v)", temp, err)
+	}
+}
+
+func titled(id int64, state forge.RunState, created time.Time, title string) *forge.Run {
+	r := run(id, state, created)
+	r.Workflow, r.WorkflowPath = title, ".github/workflows/promote.yaml"
+	return r
+}
+
+func TestCommit_runs_of_one_workflow_path_share_one_verdict_whatever_their_names(t *testing.T) {
+	s := open(t, t.TempDir())
+	commit(t, s, "gh", read(
+		titled(1, forge.RunFailing, t0.Add(-2*time.Hour), "Promote toolbelt (dry run)"),
+		titled(2, forge.RunPassing, t0.Add(-time.Hour), "Promote keyenc"),
+	))
+	var keys []WorkflowKey
+	for k := range s.Workflows("gh") {
+		keys = append(keys, k)
+	}
+	want := WorkflowKey{Repo: "o/r", Workflow: ".github/workflows/promote.yaml", Branch: "main"}
+	if len(keys) != 1 || keys[0] != want {
+		t.Fatalf("Workflows keys = %v, want the one workflow %v", keys, want)
+	}
+	w := workflowOn(t, s, "o/r", ".github/workflows/promote.yaml", "main")
+	if w.State != forge.RunPassing || w.RunID != 2 || w.Name != "Promote keyenc" || w.Path != ".github/workflows/promote.yaml" {
+		t.Errorf("verdict = %+v, want passing at run 2, named as that run and carrying its path", w)
+	}
+}
+
+func TestLoad_a_file_keying_verdicts_by_run_name_holds_none_and_the_next_listing_rebuilds_them(t *testing.T) {
+	dir := t.TempDir()
+	old := `{"version":2,"connections":{"gh":{"delivered":{"o/r":{"1":` + goodDelivered + `}},` +
+		`"verdicts":{"o/r":{"Promote toolbelt (dry run)":{"main":` + goodCold + `}}},"listed":{"o/r":"2026-10-01T12:00:00Z"}}}}`
+	if err := os.WriteFile(filepath.Join(dir, fileName), []byte(old), 0o600); err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	s := open(t, dir)
+	if d, err := s.Load(t.Context()); d != nil || err != nil {
+		t.Fatalf("Load = %+v, %v, want the file accepted: its delivered runs still hold", d, err)
+	}
+	for k, w := range s.Workflows("gh") {
+		t.Errorf("Workflows after the load holds %v = %+v, want none: a verdict keyed by a run's name names no workflow", k, *w)
+	}
+	if got := s.Delivered("gh"); got != 1 {
+		t.Errorf("Delivered after the load = %d, want the file's 1", got)
+	}
+	changes := commit(t, s, "gh", scanAt(t0.Add(2*time.Hour),
+		titled(1, forge.RunFailing, t0, "Promote toolbelt (dry run)"),
+		titled(2, forge.RunPassing, t0.Add(time.Hour), "Promote keyenc"),
+	))
+	if len(changes) != 1 || changes[0].Run.ID != 2 {
+		t.Errorf("changes of the next listing = %+v, want run 2 alone: run 1 was delivered before the restart", changes)
+	}
+	if w := workflowOn(t, s, "o/r", ".github/workflows/promote.yaml", "main"); w.State != forge.RunPassing || w.RunID != 2 {
+		t.Errorf("verdict rebuilt from the next listing = %+v, want passing at run 2", w)
 	}
 }

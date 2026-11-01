@@ -213,7 +213,7 @@ func recordContract(t *testing.T) contract {
 		{Repo: "o/r", Number: 1, Rule: "go/sql-injection", SecuritySeverity: "critical", Tool: "CodeQL", Source: "code_scanning", URL: "https://gh.test/a/1", CreatedAt: now},
 		{Repo: "o/r", Number: 2, Rule: "G104", SecuritySeverity: "low", Tool: "gosec", Source: "code_scanning", URL: "https://gh.test/a/2", CreatedAt: now},
 	}}
-	gh.gh.workflows = map[string][]forge.Workflow{"o/r": {{Repo: "o/r", Name: "CI", State: "active"}, {Repo: "o/r", Name: "nightly", Path: ".github/workflows/n.yaml", State: "disabled_inactivity"}}}
+	gh.gh.workflows = map[string][]forge.Workflow{"o/r": {{Repo: "o/r", Name: "CI", Path: ciPath, State: "active"}, {Repo: "o/r", Name: "nightly", Path: ".github/workflows/n.yaml", State: "disabled_inactivity"}}}
 	gt.conn.prs = map[string][]forge.PullRequest{"o": {{Repo: "o/r", Number: 3, Ref: "#3", Title: "t", Author: "me", CreatedAt: now, UpdatedAt: now}}}
 	h := newHarness(t, gh, gt)
 	h.scan(t)

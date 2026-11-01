@@ -336,8 +336,8 @@ func (s *Store) Delivered(conn string) int {
 	return n
 }
 
-// Workflows iterates conn's branch verdicts.
-func (s *Store) Workflows(conn string) iter.Seq2[WorkflowKey, WorkflowState] {
+// Workflows iterates copies of conn's branch verdicts.
+func (s *Store) Workflows(conn string) iter.Seq2[WorkflowKey, *WorkflowState] {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return maps.All(s.st.workflows(conn))
@@ -431,7 +431,8 @@ type Read struct {
 	// whose verdicts alone stay; nil when discovery was not whole.
 	Kept map[string]bool
 	// Defined is, for each repository whose workflow definitions this scan
-	// listed whole, the names it listed, deleted ones included.
+	// listed whole, the identities (forge.Run.WorkflowID) it listed, deleted
+	// ones included.
 	Defined  map[string][]string
 	Listings []Listing
 }
@@ -471,11 +472,12 @@ type Change struct {
 	New bool
 }
 
-// WorkflowKey names one workflow of one repository on one branch.
+// WorkflowKey names one workflow of one repository on one branch; Workflow is
+// its identity, forge.Run.WorkflowID.
 type WorkflowKey struct {
-	Repo   string
-	Name   string
-	Branch string
+	Repo     string
+	Workflow string
+	Branch   string
 }
 
 // WorkflowState is a workflow's newest judged run on a branch and its
@@ -484,10 +486,13 @@ type WorkflowKey struct {
 // may have begun before Since: its start reaches back past what any listing
 // covered.
 type WorkflowState struct {
-	Since   time.Time
-	Last    time.Time
-	State   forge.RunState
-	URL     string
+	Since time.Time
+	Last  time.Time
+	State forge.RunState
+	URL   string
+	// Name and Path are the workflow's name and path as that run gave them.
+	Name    string
+	Path    string
 	RunID   int64
 	Streak  int
 	Clipped bool
@@ -504,8 +509,9 @@ type state struct {
 func newState() *state { return &state{conns: map[string]*connState{}} }
 
 type connState struct {
-	// Verdicts holds each repository's verdicts by workflow then branch.
-	Verdicts map[string]map[string]map[string]*verdict `json:"verdicts"`
+	// Verdicts holds each repository's verdicts by workflow identity then
+	// branch.
+	Verdicts map[string]map[string]map[string]*verdict `json:"workflow_verdicts"`
 	// Delivered holds each repository's delivered runs by ID, a run ID
 	// identifying a run only within its repository, until the run is
 	// created before the window.
@@ -577,6 +583,8 @@ type verdict struct {
 	Created time.Time      `json:"created"`
 	State   forge.RunState `json:"state"`
 	URL     string         `json:"url"`
+	Name    string         `json:"name,omitempty"`
+	Path    string         `json:"path,omitempty"`
 	// Base is the streak the run followed, nil when no listing covered the
 	// run before it; a re-run of the run is judged against it again.
 	Base    *streak `json:"base,omitempty"`
@@ -703,11 +711,11 @@ func (cs *connState) validDelivered() error {
 }
 
 func (cs *connState) validVerdicts() error {
-	for repo, byName := range cs.Verdicts {
-		for name, byBranch := range byName {
+	for repo, byWorkflow := range cs.Verdicts {
+		for workflow, byBranch := range byWorkflow {
 			for branch, v := range byBranch {
 				if err := v.validate(); err != nil {
-					return fmt.Errorf("repo %q workflow %q branch %q: %w", repo, name, branch, err)
+					return fmt.Errorf("repo %q workflow %q branch %q: %w", repo, workflow, branch, err)
 				}
 			}
 		}
@@ -796,9 +804,9 @@ func (cs *connState) clone() *connState {
 		Listed:    maps.Clone(cs.Listed),
 		Pending:   maps.Clone(cs.Pending),
 	}
-	for repo, byName := range cs.Verdicts {
-		names := make(map[string]map[string]*verdict, len(byName))
-		for name, byBranch := range byName {
+	for repo, byWorkflow := range cs.Verdicts {
+		workflows := make(map[string]map[string]*verdict, len(byWorkflow))
+		for workflow, byBranch := range byWorkflow {
 			branches := make(map[string]*verdict, len(byBranch))
 			for branch, v := range byBranch {
 				c := *v
@@ -808,9 +816,9 @@ func (cs *connState) clone() *connState {
 				}
 				branches[branch] = &c
 			}
-			names[name] = branches
+			workflows[workflow] = branches
 		}
-		out.Verdicts[repo] = names
+		out.Verdicts[repo] = workflows
 	}
 	for repo, byID := range cs.Delivered {
 		runs := make(map[string]*delivered, len(byID))
@@ -883,8 +891,8 @@ func (st *state) apply(conn string, r *Read) []Change {
 	for i := range r.Listings {
 		changes[i] = cs.list(&r.Listings[i], r.Start, r.Window)
 	}
-	for repo, names := range r.Defined {
-		cs.define(repo, names)
+	for repo, workflows := range r.Defined {
+		cs.define(repo, workflows)
 	}
 	for _, c := range st.conns {
 		c.prune(r.Window, r.Start)
@@ -913,7 +921,7 @@ func (cs *connState) list(l *Listing, start, window time.Time) []Change {
 		}
 		cs.countDay(l.Repo, o, start)
 		if o.Run.Trigger != forge.TriggerPullRequest {
-			k := WorkflowKey{Repo: l.Repo, Name: o.Run.Workflow, Branch: o.Run.Branch}
+			k := WorkflowKey{Repo: l.Repo, Workflow: o.Run.WorkflowID(), Branch: o.Run.Branch}
 			v := cs.verdict(k)
 			// A verdict whose run this listing covers has no gap before the
 			// runs that follow it.
@@ -1004,7 +1012,7 @@ func judge(v *verdict, r *forge.Run, covered bool) *verdict {
 		base = &b
 	}
 	return &verdict{
-		Created: r.CreatedAt, State: r.State, URL: r.URL, RunID: r.ID,
+		Created: r.CreatedAt, State: r.State, URL: r.URL, Name: r.Workflow, Path: r.WorkflowPath, RunID: r.ID,
 		Base: base, Streak: base.next(r.State, r.CreatedAt), Defined: v != nil && v.Defined,
 	}
 }
@@ -1093,10 +1101,10 @@ func (cs *connState) day(repo, key string) *day {
 	return d
 }
 
-// define marks each of repo's verdicts of a workflow names lists.
-func (cs *connState) define(repo string, names []string) {
-	for _, name := range names {
-		for _, v := range cs.Verdicts[repo][name] {
+// define marks each of repo's verdicts of a workflow workflows lists.
+func (cs *connState) define(repo string, workflows []string) {
+	for _, workflow := range workflows {
+		for _, v := range cs.Verdicts[repo][workflow] {
 			v.Defined = true
 		}
 	}
@@ -1128,19 +1136,19 @@ func (cs *connState) prune(window, start time.Time) {
 }
 
 func (cs *connState) verdict(k WorkflowKey) *verdict {
-	return cs.Verdicts[k.Repo][k.Name][k.Branch]
+	return cs.Verdicts[k.Repo][k.Workflow][k.Branch]
 }
 
 func (cs *connState) setVerdict(k WorkflowKey, v *verdict) {
-	byName := cs.Verdicts[k.Repo]
-	if byName == nil {
-		byName = map[string]map[string]*verdict{}
-		cs.Verdicts[k.Repo] = byName
+	byWorkflow := cs.Verdicts[k.Repo]
+	if byWorkflow == nil {
+		byWorkflow = map[string]map[string]*verdict{}
+		cs.Verdicts[k.Repo] = byWorkflow
 	}
-	byBranch := byName[k.Name]
+	byBranch := byWorkflow[k.Workflow]
 	if byBranch == nil {
 		byBranch = map[string]*verdict{}
-		byName[k.Name] = byBranch
+		byWorkflow[k.Workflow] = byBranch
 	}
 	byBranch[k.Branch] = v
 }
@@ -1148,29 +1156,29 @@ func (cs *connState) setVerdict(k WorkflowKey, v *verdict) {
 // dropVerdicts deletes the verdicts drop selects, and every workflow and
 // repository left with none.
 func (cs *connState) dropVerdicts(drop func(WorkflowKey, *verdict) bool) {
-	for repo, byName := range cs.Verdicts {
-		for name, byBranch := range byName {
+	for repo, byWorkflow := range cs.Verdicts {
+		for workflow, byBranch := range byWorkflow {
 			maps.DeleteFunc(byBranch, func(branch string, v *verdict) bool {
-				return drop(WorkflowKey{Repo: repo, Name: name, Branch: branch}, v)
+				return drop(WorkflowKey{Repo: repo, Workflow: workflow, Branch: branch}, v)
 			})
 			if len(byBranch) == 0 {
-				delete(byName, name)
+				delete(byWorkflow, workflow)
 			}
 		}
-		if len(byName) == 0 {
+		if len(byWorkflow) == 0 {
 			delete(cs.Verdicts, repo)
 		}
 	}
 }
 
-func (st *state) workflows(conn string) map[WorkflowKey]WorkflowState {
-	out := map[WorkflowKey]WorkflowState{}
+func (st *state) workflows(conn string) map[WorkflowKey]*WorkflowState {
+	out := map[WorkflowKey]*WorkflowState{}
 	if cs, ok := st.conns[conn]; ok {
-		for repo, byName := range cs.Verdicts {
-			for name, byBranch := range byName {
+		for repo, byWorkflow := range cs.Verdicts {
+			for workflow, byBranch := range byWorkflow {
 				for branch, v := range byBranch {
-					out[WorkflowKey{Repo: repo, Name: name, Branch: branch}] = WorkflowState{
-						Since: v.Streak.Since, Last: v.Created, State: v.State, URL: v.URL, RunID: v.RunID,
+					out[WorkflowKey{Repo: repo, Workflow: workflow, Branch: branch}] = &WorkflowState{
+						Since: v.Streak.Since, Last: v.Created, State: v.State, URL: v.URL, Name: v.Name, Path: v.Path, RunID: v.RunID,
 						Streak: v.Streak.Count, Clipped: v.Streak.Clipped, Defined: v.Defined,
 					}
 				}

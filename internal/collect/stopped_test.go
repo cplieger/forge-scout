@@ -26,7 +26,7 @@ func TestScan_a_stop_after_a_complete_scan_logs_no_snapshot_and_stores_none(t *t
 	gh.conn.issues = map[string][]forge.Issue{"o": {{Repo: "o/r", Number: 2, Ref: "#2", Title: "t", Author: "me", CreatedAt: now, UpdatedAt: now}}}
 	gh.conn.runs = map[string]listing{"o/r": {Runs: []forge.Run{run(1, forge.RunFailing, now.Add(-time.Hour))}}}
 	gh.gh.alerts = map[string][]forge.Alert{"o/r": {{Repo: "o/r", Number: 1, Rule: "r", SecuritySeverity: "high", Tool: "CodeQL", Source: "code_scanning", CreatedAt: now}}}
-	gh.gh.workflows = map[string][]forge.Workflow{"o/r": {{Repo: "o/r", Name: "CI", State: "active"}, {Repo: "o/r", Name: "old", State: "disabled_inactivity"}}}
+	gh.gh.workflows = map[string][]forge.Workflow{"o/r": {{Repo: "o/r", Name: "CI", Path: ciPath, State: "active"}, {Repo: "o/r", Name: "old", State: "disabled_inactivity"}}}
 	h := newHarness(t, gh, gt)
 	h.scan(t)
 	for _, msg := range []string{"open pull request", "open issue", "failing workflow", "disabled workflow", "security alert", "top security alert", dayMessage, "scan complete"} {

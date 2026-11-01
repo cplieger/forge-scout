@@ -82,7 +82,7 @@ func TestConfigurationDoc_names_every_exclude_condition(t *testing.T) {
 }
 
 func TestConfigurationDoc_exclude_example_loads_with_the_rules_it_describes(t *testing.T) {
-	t.Setenv("GITHUB_TOKEN", "test-token")
+	t.Parallel()
 	page := readDoc(t, "../../docs/configuration.md")
 	_, section, _ := strings.Cut(page, "## Leaving repositories and items out\n")
 	_, block, found := strings.Cut(section, "```yaml\n")
@@ -90,7 +90,7 @@ func TestConfigurationDoc_exclude_example_loads_with_the_rules_it_describes(t *t
 	if !found || !closed {
 		t.Fatal("docs/configuration.md exclusions section has no yaml example")
 	}
-	cfg, _, err := Load(writeConfig(t, block))
+	cfg, _, err := load(writeConfig(t, block), tokenEnv)
 	if err != nil {
 		t.Fatalf("Load(the exclusions example) = %v, want it loaded", err)
 	}

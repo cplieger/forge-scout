@@ -88,11 +88,18 @@ type Run struct {
 	Started  time.Time
 	Updated  time.Time
 	Workflow string
-	Branch   string
-	Event    string
-	Outcome  string
-	ID       int64
-	Number   int64
+	// Title is the name the forge gives the run where it is not Workflow, as
+	// a GitHub run-name or a GitLab pipeline name sets it; Gitea and Forgejo
+	// name a run by its workflow file alone.
+	Title string
+	// Path is the run's workflow definition on GitHub,
+	// .github/workflows/<Workflow>.yaml when empty.
+	Path    string
+	Branch  string
+	Event   string
+	Outcome string
+	ID      int64
+	Number  int64
 }
 
 // Item is one open pull request or issue.
@@ -129,6 +136,9 @@ type Server struct {
 	notModified int
 	// cost is the points each GitHub document reports it cost.
 	cost int
+	// projectsThrottle is the whole limit of the throttle GitLab's project
+	// listings answer from, zero for the one every route answers from.
+	projectsThrottle int
 }
 
 // New starts a fake instance of product serving w. The caller closes it.
@@ -157,6 +167,16 @@ func (s *Server) SetGraphQLCost(points int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.cost = points
+}
+
+// SetProjectsThrottle has later GitLab project listings answer from a
+// throttle of limit with one request of it spent, as gitlab.com answers them
+// from burst_traffic_per_user_free_plan, 100 a minute, while every other
+// route answers from throttle_authenticated_api.
+func (s *Server) SetProjectsThrottle(limit int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.projectsThrottle = limit
 }
 
 // SetBudget changes the budget later responses report.
