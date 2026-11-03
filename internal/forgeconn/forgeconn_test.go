@@ -469,6 +469,33 @@ func TestOpenPRs_maps_rows(t *testing.T) {
 	}
 }
 
+func TestOpenPRs_and_RepoOpenPRs_leave_merge_state_unread(t *testing.T) {
+	var mine, listed forgeapi.ListSettings
+	f := &fakeAPI{
+		myPRs: func(opts ...forgeapi.ListOption) (forgeapi.Page[forgeapi.PullRequest], error) {
+			mine = settings(t, opts)
+			return prPage(7, nil), nil
+		},
+		listPRs: func(opts ...forgeapi.ListOption) (forgeapi.Page[forgeapi.PullRequest], error) {
+			listed = settings(t, opts)
+			return prPage(7, nil), nil
+		},
+	}
+	c := client(t, f)
+	if _, err := c.OpenPRs(t.Context(), "o"); err != nil {
+		t.Fatalf("OpenPRs = %v", err)
+	}
+	if _, err := c.RepoOpenPRs(t.Context(), ghRepo); err != nil {
+		t.Fatalf("RepoOpenPRs = %v", err)
+	}
+	if !mine.MergeStateSet || mine.MergeState {
+		t.Errorf("OpenPRs sent merge state %t (set %t), want false, set", mine.MergeState, mine.MergeStateSet)
+	}
+	if !listed.MergeStateSet || listed.MergeState {
+		t.Errorf("RepoOpenPRs sent merge state %t (set %t), want false, set", listed.MergeState, listed.MergeStateSet)
+	}
+}
+
 // TestOpenPRs_and_OpenIssues_carry_the_author_kind holds each kind forgeapi
 // names to the row: a GitHub App's GraphQL login carries no [bot] suffix, so the
 // kind is the only thing that says it is a bot.
