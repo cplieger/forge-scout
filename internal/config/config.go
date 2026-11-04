@@ -31,7 +31,7 @@ import (
 	"github.com/cplieger/go/filesafe"
 	"github.com/cplieger/go/slogx"
 	"github.com/cplieger/go/yamlenv"
-	"go.yaml.in/yaml/v3"
+	"go.yaml.in/yaml/v4"
 )
 
 // defaultPath is the container-internal config file path.
