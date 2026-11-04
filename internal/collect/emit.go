@@ -10,7 +10,7 @@ import (
 
 	"github.com/cplieger/forge-scout/internal/forge"
 	"github.com/cplieger/forge-scout/internal/runstate"
-	"github.com/cplieger/runesafe/v3"
+	"github.com/cplieger/go/textsafe"
 )
 
 func stamp(t time.Time) string { return t.UTC().Format(time.RFC3339) }
@@ -26,7 +26,7 @@ const cutMark = "…"
 
 // bounded is s sanitized and cut at maxValueBytes, for a diagnostic line.
 func bounded(s string) string {
-	v, _ := runesafe.SanitizeCapped(s, maxValueBytes, cutMark)
+	v, _ := textsafe.SanitizeCapped(s, maxValueBytes, cutMark)
 	return v
 }
 
@@ -45,7 +45,7 @@ func (l *lineAttrs) add(attrs ...slog.Attr) { l.attrs = append(l.attrs, attrs...
 
 // text adds key's forge-controlled value s, sanitized and bounded.
 func (l *lineAttrs) text(key, s string) {
-	v, cut := runesafe.SanitizeCapped(s, maxValueBytes, cutMark)
+	v, cut := textsafe.SanitizeCapped(s, maxValueBytes, cutMark)
 	if cut {
 		l.cut = append(l.cut, key)
 	}
@@ -56,7 +56,7 @@ func (l *lineAttrs) text(key, s string) {
 // bound, is not an http or https URL with a host, or holds a rune the
 // sanitizer would replace: a cut or altered link opens another page.
 func (l *lineAttrs) link(s string) {
-	if s != "" && (len(s) > maxValueBytes || !webURL(s) || runesafe.SanitizeSingleLine(s) != s) {
+	if s != "" && (len(s) > maxValueBytes || !webURL(s) || textsafe.SanitizeSingleLine(s) != s) {
 		l.cut = append(l.cut, "url")
 		return
 	}

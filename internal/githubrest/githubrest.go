@@ -25,9 +25,9 @@ import (
 	"github.com/cplieger/forge-scout/internal/ghquota"
 	"github.com/cplieger/forge-scout/internal/urlsafe"
 	"github.com/cplieger/forgeapi/readcache"
-	"github.com/cplieger/httpx/v5"
-	"github.com/cplieger/jsoncap/v2"
-	"github.com/cplieger/ssrf/v4"
+	"github.com/cplieger/go/httpclient"
+	"github.com/cplieger/go/jsonx"
+	"github.com/cplieger/go/ssrf"
 )
 
 const (
@@ -51,7 +51,7 @@ type Client struct {
 	base    string
 	token   string
 	version string
-	retry   []httpx.DoOption
+	retry   []httpclient.DoOption
 }
 
 // New returns a client for the API at base (see APIBase). version is sent as
@@ -61,12 +61,12 @@ type Client struct {
 // admitted by meter, the connection's quota, which sees its response. Its
 // transport sees each request as sent, a validator the read cache adds
 // included.
-func New(hc *http.Client, base, token, version string, meter *ghquota.Meter, logger *slog.Logger, retry ...httpx.Option) (*Client, error) {
-	opts := make([]httpx.DoOption, 0, len(retry)+2)
+func New(hc *http.Client, base, token, version string, meter *ghquota.Meter, logger *slog.Logger, retry ...httpclient.Option) (*Client, error) {
+	opts := make([]httpclient.DoOption, 0, len(retry)+2)
 	for _, o := range retry {
 		opts = append(opts, o)
 	}
-	opts = append(opts, httpx.WithLabel("github rest"), httpx.WithLogger(logger))
+	opts = append(opts, httpclient.WithLabel("github rest"), httpclient.WithLogger(logger))
 	inner := hc.Transport
 	if inner == nil {
 		inner = http.DefaultTransport
@@ -133,7 +133,7 @@ func httpClient(base string, private, plaintext bool, opts ...ssrf.TransportOpti
 	}
 	return &http.Client{
 		Timeout:       30 * time.Second,
-		CheckRedirect: httpx.RedirectPolicyFunc(httpx.WithSameOrigin(true)),
+		CheckRedirect: httpclient.RedirectPolicyFunc(httpclient.WithSameOrigin(true)),
 		Transport:     ssrf.SafeTransport(opts...),
 	}
 }
@@ -288,7 +288,7 @@ func (c *Client) CodeScanningAlerts(ctx context.Context, repo forge.Repo) (forge
 // a JSON array, null included, or that holds more rows than a page asks for,
 // is a decode failure, never an empty or a cut page.
 func decodeAlerts(repo string, body []byte) ([]forge.Alert, error) {
-	d := jsoncap.NewDecoder(bytes.NewReader(body), perPage)
+	d := jsonx.NewDecoder(bytes.NewReader(body), perPage)
 	rows, err := d.Array(nil, perPage, "alerts page", func(a *apiAlert) error { return d.Decode(a) })
 	if err == nil {
 		err = d.End()
@@ -335,7 +335,7 @@ func (c *Client) Workflows(ctx context.Context, repo forge.Repo) (forge.Listing[
 // (https://docs.github.com/en/rest/actions/workflows#list-repository-workflows),
 // is a decode failure.
 func decodeWorkflows(repo string, body []byte) ([]forge.Workflow, error) {
-	d := jsoncap.NewDecoder(bytes.NewReader(body), perPage)
+	d := jsonx.NewDecoder(bytes.NewReader(body), perPage)
 	var page []apiWorkflow
 	err := d.Object(func(key string) error {
 		if !strings.EqualFold(key, "workflows") {
@@ -378,9 +378,9 @@ func segments(path string) (owner, name string, err error) {
 }
 
 // get reads one page's body under the client's retry policy, which repeats a
-// 5xx and the transport errors httpx.IsTransient accepts.
+// 5xx and the transport errors httpclient.IsTransient accepts.
 func (c *Client) get(ctx context.Context, route string, q url.Values) ([]byte, error) {
-	return httpx.Do(ctx, func(ctx context.Context) ([]byte, error) {
+	return httpclient.Do(ctx, func(ctx context.Context) ([]byte, error) {
 		return c.attempt(ctx, c.base+route+"?"+q.Encode())
 	}, c.retry...)
 }
@@ -405,10 +405,10 @@ func (c *Client) attempt(ctx context.Context, reqURL string) ([]byte, error) {
 	}
 	defer resp.Body.Close()
 	if err := c.statusError(resp); err != nil {
-		httpx.Drain(resp.Body)
+		httpclient.Drain(resp.Body)
 		return nil, err
 	}
-	return httpx.ReadLimitedBody(resp.Body, bodyCap)
+	return httpclient.ReadLimitedBody(resp.Body, bodyCap)
 }
 
 // statusError is the package statusError, a rate limit carrying the budget
@@ -440,10 +440,10 @@ func statusError(resp *http.Response) error {
 	case code == http.StatusNotFound:
 		return errNotFound
 	case code == http.StatusTooManyRequests:
-		return fmt.Errorf("%w: %w", forge.ErrRateLimited, httpx.CheckHTTPStatus(resp))
+		return fmt.Errorf("%w: %w", forge.ErrRateLimited, httpclient.CheckStatus(resp))
 	case code >= 500:
-		return httpx.MarkTransient(httpx.CheckHTTPStatus(resp))
+		return httpclient.MarkTransient(httpclient.CheckStatus(resp))
 	default:
-		return httpx.CheckHTTPStatus(resp)
+		return httpclient.CheckStatus(resp)
 	}
 }

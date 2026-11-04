@@ -38,16 +38,16 @@ The image is built on distroless static and runs as the `nonroot` user, uid 6553
 | golang | [Go](https://hub.docker.com/_/golang), the build stage only |
 | Distroless static | [Distroless](https://github.com/GoogleContainerTools/distroless) |
 | cplieger/forgeapi | [forgeapi](https://github.com/cplieger/forgeapi), the client for every forge |
-| cplieger/urlform | [urlform](https://github.com/cplieger/urlform), the check forgeapi runs on each connection's `url` before it sends a request |
-| cplieger/httpx | [httpx](https://github.com/cplieger/httpx), the retrying HTTP client under forgeapi and the GitHub code-scanning and workflow reads |
-| cplieger/jsoncap | [jsoncap](https://github.com/cplieger/jsoncap), the size and item limits on decoded responses, forgeapi's and the GitHub code-scanning and workflow pages |
-| cplieger/ssrf | [ssrf](https://github.com/cplieger/ssrf), the private-address check on every connection's requests |
-| cplieger/envx | [envx](https://github.com/cplieger/envx), the `${NAME}` expansion in the config file |
+| cplieger/go/urlform | [urlform](https://github.com/cplieger/go/tree/main/urlform), the check forgeapi runs on each connection's `url` before it sends a request |
+| cplieger/go/httpclient | [httpclient](https://github.com/cplieger/go/tree/main/httpclient), the retrying HTTP client under forgeapi and the GitHub code-scanning and workflow reads |
+| cplieger/go/jsonx | [jsonx](https://github.com/cplieger/go/tree/main/jsonx), the size and item limits on decoded responses, forgeapi's and the GitHub code-scanning and workflow pages |
+| cplieger/go/ssrf | [ssrf](https://github.com/cplieger/go/tree/main/ssrf), the private-address check on every connection's requests |
+| cplieger/go/envx | [envx](https://github.com/cplieger/go/tree/main/envx), the `${NAME}` expansion in the config file |
 | go.yaml.in/yaml/v3 | [yaml](https://github.com/yaml/go-yaml), the config file parser |
-| cplieger/atomicfile | [atomicfile](https://github.com/cplieger/atomicfile), the crash-safe run state file |
-| cplieger/health | [health](https://github.com/cplieger/health), the file-marker probe |
-| cplieger/scheduler | [scheduler](https://github.com/cplieger/scheduler), the scan loop |
-| cplieger/slogx | [slogx](https://github.com/cplieger/slogx), the log setup |
-| cplieger/runesafe | [runesafe](https://github.com/cplieger/runesafe), the sanitizer for text read from the forges |
+| cplieger/go/filesafe | [filesafe](https://github.com/cplieger/go/tree/main/filesafe), the crash-safe run state file |
+| cplieger/go/health | [health](https://github.com/cplieger/go/tree/main/health), the file-marker probe |
+| cplieger/go/scheduler | [scheduler](https://github.com/cplieger/go/tree/main/scheduler), the scan loop |
+| cplieger/go/slogx | [slogx](https://github.com/cplieger/go/tree/main/slogx), the log setup |
+| cplieger/go/textsafe | [textsafe](https://github.com/cplieger/go/tree/main/textsafe), the sanitizer for text read from the forges |
 
 [Renovate](https://github.com/renovatebot/renovate) updates every dependency, and each is pinned by digest or version so a build can be reproduced.

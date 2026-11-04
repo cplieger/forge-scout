@@ -19,7 +19,7 @@ import (
 	"github.com/cplieger/forge-scout/internal/forge"
 	"github.com/cplieger/forge-scout/internal/runstate"
 	"github.com/cplieger/forge-scout/internal/spend"
-	"github.com/cplieger/slogx/capture"
+	"github.com/cplieger/go/slogx/capture"
 )
 
 // blockUntilDone holds the read named call until its context ends; fallback

@@ -19,8 +19,8 @@ import (
 	"github.com/cplieger/forge-scout/internal/forgeconn/forgeconntest"
 	"github.com/cplieger/forge-scout/internal/githubrest"
 	"github.com/cplieger/forge-scout/internal/runstate"
-	"github.com/cplieger/slogx"
-	"github.com/cplieger/slogx/capture"
+	"github.com/cplieger/go/slogx"
+	"github.com/cplieger/go/slogx/capture"
 )
 
 func world(owner string) forgeconntest.World {

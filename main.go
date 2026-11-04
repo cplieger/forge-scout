@@ -26,9 +26,9 @@ import (
 	"github.com/cplieger/forge-scout/internal/runstate"
 	"github.com/cplieger/forge-scout/internal/spend"
 	"github.com/cplieger/forgeapi/github"
-	"github.com/cplieger/health"
-	"github.com/cplieger/scheduler/v4"
-	"github.com/cplieger/slogx"
+	"github.com/cplieger/go/health"
+	"github.com/cplieger/go/scheduler"
+	"github.com/cplieger/go/slogx"
 )
 
 // stateDir is the volume the run state lives on.

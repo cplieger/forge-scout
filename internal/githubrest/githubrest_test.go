@@ -20,8 +20,8 @@ import (
 	"github.com/cplieger/forge-scout/internal/forge"
 	"github.com/cplieger/forge-scout/internal/ghquota"
 	"github.com/cplieger/forge-scout/internal/spend"
-	"github.com/cplieger/httpx/v5"
-	"github.com/cplieger/ssrf/v4"
+	"github.com/cplieger/go/httpclient"
+	"github.com/cplieger/go/ssrf"
 )
 
 const testVersion = "2026-03-10"
@@ -36,14 +36,14 @@ func armed() *ghquota.Meter {
 // newClient serves h to a client making one attempt per request.
 func newClient(t *testing.T, h http.HandlerFunc) *Client {
 	t.Helper()
-	return newClientWith(t, h, httpx.WithMaxAttempts(1))
+	return newClientWith(t, h, httpclient.WithMaxAttempts(1))
 }
 
-func newClientWith(t *testing.T, h http.HandlerFunc, retry ...httpx.Option) *Client {
+func newClientWith(t *testing.T, h http.HandlerFunc, retry ...httpclient.Option) *Client {
 	t.Helper()
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
-	c, err := New(httpx.NewClient(5*time.Second), srv.URL, "test-token", testVersion, armed(), slog.New(slog.DiscardHandler), retry...)
+	c, err := New(httpclient.New(5*time.Second), srv.URL, "test-token", testVersion, armed(), slog.New(slog.DiscardHandler), retry...)
 	if err != nil {
 		t.Fatalf("Setup: New = %v", err)
 	}
@@ -480,7 +480,7 @@ func TestCodeScanningAlerts_retries_a_server_error(t *testing.T) {
 			return
 		}
 		io.WriteString(w, alertsPage(1, 1))
-	}, httpx.WithMaxAttempts(2), httpx.WithBaseDelay(time.Millisecond))
+	}, httpclient.WithMaxAttempts(2), httpclient.WithBaseDelay(time.Millisecond))
 	got, err := c.CodeScanningAlerts(t.Context(), repo)
 	if err != nil || len(got.Rows) != 1 || calls.Load() != 2 {
 		t.Errorf("CodeScanningAlerts after a 500 = %d alerts, %d calls, %v, want the retry to answer 1 alert", len(got.Rows), calls.Load(), err)
@@ -533,7 +533,7 @@ func TestBudget_a_retried_read_charges_each_attempt_and_holds_the_next(t *testin
 			return
 		}
 		io.WriteString(w, alertsPage(1, 1))
-	}, httpx.WithMaxAttempts(3), httpx.WithBaseDelay(time.Millisecond))
+	}, httpclient.WithMaxAttempts(3), httpclient.WithBaseDelay(time.Millisecond))
 	for range 2 {
 		if _, err := c.CodeScanningAlerts(t.Context(), repo); err != nil {
 			t.Fatalf("CodeScanningAlerts = %v, want the read", err)
@@ -558,7 +558,7 @@ func TestBudget_pages_and_retries_stop_at_the_reserve(t *testing.T) {
 			return
 		}
 		io.WriteString(w, alertsPage(1, perPage))
-	}), httpx.WithMaxAttempts(3), httpx.WithBaseDelay(time.Millisecond))
+	}), httpclient.WithMaxAttempts(3), httpclient.WithBaseDelay(time.Millisecond))
 	if _, err := c.CodeScanningAlerts(t.Context(), repo); !errors.Is(err, forge.ErrReadDeferred) {
 		t.Errorf("CodeScanningAlerts over a retry and full pages = %v, want forge.ErrReadDeferred at the reserve", err)
 	}
@@ -593,7 +593,7 @@ func TestBudget_a_followed_redirect_is_admitted_and_charged(t *testing.T) {
 }
 
 func TestNew_leaves_the_callers_client_unchanged(t *testing.T) {
-	hc := httpx.NewClient(5 * time.Second)
+	hc := httpclient.New(5 * time.Second)
 	if _, err := New(hc, "https://api.example.test", "test-token", testVersion, armed(), slog.New(slog.DiscardHandler)); err != nil {
 		t.Fatalf("New = %v", err)
 	}
@@ -657,7 +657,7 @@ func TestCodeScanningAlerts_a_refused_cross_host_redirect_is_not_retried(t *test
 	c := newClientWith(t, func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
 		http.Redirect(w, r, "https://elsewhere.example.test/alerts", http.StatusFound)
-	}, httpx.WithMaxAttempts(3), httpx.WithBaseDelay(time.Millisecond))
+	}, httpclient.WithMaxAttempts(3), httpclient.WithBaseDelay(time.Millisecond))
 	if _, err := c.CodeScanningAlerts(t.Context(), repo); err == nil || calls.Load() != 1 {
 		t.Errorf("CodeScanningAlerts redirected to another host = %v after %d requests, want an error after 1: the refusal cannot heal", err, calls.Load())
 	}
@@ -691,7 +691,7 @@ func TestHTTPClient_a_redirect_to_another_port_on_the_host_gets_no_token(t *test
 	// Both ports are admitted so only the redirect policy can stop the hop,
 	// as it must for a base on a custom port redirecting to 443.
 	c, err := New(httpClient(srv.URL, true, true, ssrf.WithAllowedPorts(ports...)), srv.URL, "test-token", testVersion, armed(),
-		slog.New(slog.DiscardHandler), httpx.WithMaxAttempts(1))
+		slog.New(slog.DiscardHandler), httpclient.WithMaxAttempts(1))
 	if err != nil {
 		t.Fatalf("Setup: New = %v", err)
 	}
@@ -701,7 +701,7 @@ func TestHTTPClient_a_redirect_to_another_port_on_the_host_gets_no_token(t *test
 }
 
 // RFC 4007 section 11.2 leaves zone-ID representation implementation-defined,
-// so httpx compares its bytes exactly and treats a case change as another
+// so httpclient compares its bytes exactly and treats a case change as another
 // origin.
 func TestHTTPClient_a_redirect_to_the_host_under_another_zone_case_is_refused(t *testing.T) {
 	const base = "https://[fe80::1%25eth0]"
@@ -719,7 +719,7 @@ func TestHTTPClient_a_redirect_to_the_host_under_another_zone_case_is_refused(t 
 		return hc.CheckRedirect(next, []*http.Request{orig})
 	}
 	err := hop("https://[fe80::1%25ETH0]/next")
-	if refused, ok := errors.AsType[*httpx.RedirectRefusedError](err); !ok || refused.Reason != httpx.RedirectOtherOrigin {
+	if refused, ok := errors.AsType[*httpclient.RedirectRefusedError](err); !ok || refused.Reason != httpclient.RedirectOtherOrigin {
 		t.Errorf("CheckRedirect to zone ETH0 from zone eth0 = %v, want a refusal as another origin", err)
 	}
 	if err := hop("https://[fe80::1%25eth0]/next"); err != nil {
@@ -752,7 +752,7 @@ func TestHTTPClient_dials_a_private_address_only_when_the_connection_allows_it(t
 			base := "http://forge.example.test:" + u.Port()
 			resolver := &loopbackResolver{}
 			c, err := New(httpClient(base, private, true, ssrf.WithResolver(resolver)), base, "test-token", testVersion, armed(),
-				slog.New(slog.DiscardHandler), httpx.WithMaxAttempts(1))
+				slog.New(slog.DiscardHandler), httpclient.WithMaxAttempts(1))
 			if err != nil {
 				t.Fatalf("Setup: New = %v", err)
 			}
@@ -813,9 +813,9 @@ func meteredClient(t *testing.T, h http.HandlerFunc) (*Client, *spend.Meter) {
 	t.Cleanup(srv.Close)
 	spent := new(spend.Meter)
 	spent.Name(forge.ProductGitHub)
-	hc := httpx.NewClient(5 * time.Second)
+	hc := httpclient.New(5 * time.Second)
 	hc.Transport = spent.Observe(http.DefaultTransport)
-	c, err := New(hc, srv.URL, "test-token", testVersion, armed(), slog.New(slog.DiscardHandler), httpx.WithMaxAttempts(1))
+	c, err := New(hc, srv.URL, "test-token", testVersion, armed(), slog.New(slog.DiscardHandler), httpclient.WithMaxAttempts(1))
 	if err != nil {
 		t.Fatalf("Setup: New = %v", err)
 	}
