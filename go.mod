@@ -7,12 +7,12 @@ require (
 	github.com/cplieger/envx/yamlenv/v2 v2.3.0
 	github.com/cplieger/forgeapi v1.5.0-dev.2
 	github.com/cplieger/health v1.10.0
-	github.com/cplieger/httpx/v5 v5.3.0-dev.1
+	github.com/cplieger/httpx/v5 v5.3.0
 	github.com/cplieger/jsoncap/v2 v2.1.0
 	github.com/cplieger/runesafe/v3 v3.2.0
 	github.com/cplieger/scheduler/v4 v4.3.0
 	github.com/cplieger/slogx v1.8.0
-	github.com/cplieger/ssrf/v4 v4.6.0-dev.1
+	github.com/cplieger/ssrf/v4 v4.6.0
 	go.yaml.in/yaml/v3 v3.0.6
 )
 
