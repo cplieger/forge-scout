@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"github.com/cplieger/forge-scout/internal/runstate"
-	"github.com/cplieger/scheduler/v4"
-	"github.com/cplieger/slogx/capture"
+	"github.com/cplieger/go/scheduler"
+	"github.com/cplieger/go/slogx/capture"
 )
 
 // writeConfig writes body as a config file in a fresh directory and returns its path.

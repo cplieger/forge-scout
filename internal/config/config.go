@@ -26,11 +26,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cplieger/atomicfile/v4"
-	"github.com/cplieger/envx/yamlenv/v2"
 	"github.com/cplieger/forge-scout/internal/forge"
 	"github.com/cplieger/forgeapi"
-	"github.com/cplieger/slogx"
+	"github.com/cplieger/go/filesafe"
+	"github.com/cplieger/go/slogx"
+	"github.com/cplieger/go/yamlenv"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -391,12 +391,12 @@ func readFile(path string) ([]byte, error) {
 		return nil, err
 	}
 	defer root.Close()
-	f, _, err := atomicfile.OpenRegularInRoot(root, filepath.Base(path))
+	f, _, err := filesafe.OpenRegularInRoot(root, filepath.Base(path))
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
-	return atomicfile.ReadBoundedFile(context.Background(), f, maxConfigBytes)
+	return filesafe.ReadBoundedFile(context.Background(), f, maxConfigBytes)
 }
 
 // legacyEnvSet reports GITHUB_OWNER or GITHUB_TOKEN, the variables the

@@ -14,15 +14,15 @@ import (
 	"github.com/cplieger/forge-scout/internal/forge"
 	"github.com/cplieger/forge-scout/internal/ghquota"
 	"github.com/cplieger/forge-scout/internal/githubrest"
-	"github.com/cplieger/httpx/v5"
+	"github.com/cplieger/go/httpclient"
 )
 
 // restClient is a GitHub REST client of base making one attempt per request,
 // each bounded by timeout.
 func restClient(t *testing.T, base string, timeout time.Duration) *githubrest.Client {
 	t.Helper()
-	c, err := githubrest.New(httpx.NewClient(timeout), base, "test-token", "2026-03-10", armedMeter(),
-		slog.New(slog.NewTextHandler(io.Discard, nil)), httpx.WithMaxAttempts(1))
+	c, err := githubrest.New(httpclient.New(timeout), base, "test-token", "2026-03-10", armedMeter(),
+		slog.New(slog.NewTextHandler(io.Discard, nil)), httpclient.WithMaxAttempts(1))
 	if err != nil {
 		t.Fatalf("Setup: githubrest.New = %v", err)
 	}

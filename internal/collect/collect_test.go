@@ -21,7 +21,7 @@ import (
 	"github.com/cplieger/forge-scout/internal/ghquota"
 	"github.com/cplieger/forge-scout/internal/runstate"
 	"github.com/cplieger/forge-scout/internal/spend"
-	"github.com/cplieger/slogx/capture"
+	"github.com/cplieger/go/slogx/capture"
 )
 
 var now = time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC)

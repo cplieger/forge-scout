@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/cplieger/forge-scout/internal/forge"
-	"github.com/cplieger/slogx/capture"
+	"github.com/cplieger/go/slogx/capture"
 )
 
 // A connection whose scans stop at the API budget logs no rows or counts, so
