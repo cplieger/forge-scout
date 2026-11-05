@@ -31,7 +31,7 @@ With `read_only: true`, the health marker needs the tmpfs at `/tmp`, and the run
 
 ## What the image contains
 
-The image is built on distroless static and runs as the `nonroot` user, uid 65532, with no shell and no package manager. The example compose runs it as `PUID` and `PGID` instead, 1000 unless `.env` sets them, so the run state on `./data` stays owned by your host user. The image holds one static Go binary, empty `/config` and `/data` folders owned by that user, and the license text of every bundled component under `/usr/share/licenses/`. Its Go runtime dependencies are libraries by the same author, plus the YAML parser `go.yaml.in/yaml/v3`. The image is built from these:
+The image is built on distroless static and runs as the `nonroot` user, uid 65532, with no shell and no package manager. The example compose runs it as `PUID` and `PGID` instead, 1000 unless `.env` sets them, so the run state on `./data` stays owned by your host user. The image holds one static Go binary, empty `/config` and `/data` folders owned by that user, and the license text of every bundled component under `/usr/share/licenses/`. Its Go runtime dependencies are libraries by the same author, plus the YAML parser `go.yaml.in/yaml/v4`. The image is built from these:
 
 | Dependency | Source |
 | --- | --- |
@@ -42,8 +42,8 @@ The image is built on distroless static and runs as the `nonroot` user, uid 6553
 | cplieger/go/httpclient | [httpclient](https://github.com/cplieger/go/tree/main/httpclient), the retrying HTTP client under forgeapi and the GitHub code-scanning and workflow reads |
 | cplieger/go/jsonx | [jsonx](https://github.com/cplieger/go/tree/main/jsonx), the size and item limits on decoded responses, forgeapi's and the GitHub code-scanning and workflow pages |
 | cplieger/go/ssrf | [ssrf](https://github.com/cplieger/go/tree/main/ssrf), the private-address check on every connection's requests |
-| cplieger/go/envx | [envx](https://github.com/cplieger/go/tree/main/envx), the `${NAME}` expansion in the config file |
-| go.yaml.in/yaml/v3 | [yaml](https://github.com/yaml/go-yaml), the config file parser |
+| cplieger/go/yamlenv | [yamlenv](https://github.com/cplieger/go/tree/main/yamlenv), the config file decode: `${NAME}` expansion, unknown keys refused, and decode errors that never quote an expanded secret |
+| go.yaml.in/yaml/v4 | [yaml](https://github.com/yaml/go-yaml), the YAML parser under yamlenv |
 | cplieger/go/filesafe | [filesafe](https://github.com/cplieger/go/tree/main/filesafe), the crash-safe run state file |
 | cplieger/go/health | [health](https://github.com/cplieger/go/tree/main/health), the file-marker probe |
 | cplieger/go/scheduler | [scheduler](https://github.com/cplieger/go/tree/main/scheduler), the scan loop |
