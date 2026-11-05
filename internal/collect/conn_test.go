@@ -21,12 +21,8 @@ import (
 // each bounded by timeout.
 func restClient(t *testing.T, base string, timeout time.Duration) *githubrest.Client {
 	t.Helper()
-	c, err := githubrest.New(httpclient.New(timeout), base, "test-token", "2026-03-10", armedMeter(),
+	return githubrest.New(httpclient.New(timeout), base, "test-token", "2026-03-10", armedMeter(),
 		slog.New(slog.NewTextHandler(io.Discard, nil)), httpclient.WithMaxAttempts(1))
-	if err != nil {
-		t.Fatalf("Setup: githubrest.New = %v", err)
-	}
-	return c
 }
 
 func TestScan_github_rest_403_with_throttle_headers_is_a_rate_limit_stop(t *testing.T) {

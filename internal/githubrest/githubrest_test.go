@@ -43,10 +43,7 @@ func newClientWith(t *testing.T, h http.HandlerFunc, retry ...httpclient.Option)
 	t.Helper()
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
-	c, err := New(httpclient.New(5*time.Second), srv.URL, "test-token", testVersion, armed(), slog.New(slog.DiscardHandler), retry...)
-	if err != nil {
-		t.Fatalf("Setup: New = %v", err)
-	}
+	c := New(httpclient.New(5*time.Second), srv.URL, "test-token", testVersion, armed(), slog.New(slog.DiscardHandler), retry...)
 	return c
 }
 
@@ -594,9 +591,7 @@ func TestBudget_a_followed_redirect_is_admitted_and_charged(t *testing.T) {
 
 func TestNew_leaves_the_callers_client_unchanged(t *testing.T) {
 	hc := httpclient.New(5 * time.Second)
-	if _, err := New(hc, "https://api.example.test", "test-token", testVersion, armed(), slog.New(slog.DiscardHandler)); err != nil {
-		t.Fatalf("New = %v", err)
-	}
+	New(hc, "https://api.example.test", "test-token", testVersion, armed(), slog.New(slog.DiscardHandler))
 	if hc.Transport != nil {
 		t.Errorf("New replaced the caller's transport with %T, want it untouched", hc.Transport)
 	}
@@ -690,11 +685,8 @@ func TestHTTPClient_a_redirect_to_another_port_on_the_host_gets_no_token(t *test
 	}
 	// Both ports are admitted so only the redirect policy can stop the hop,
 	// as it must for a base on a custom port redirecting to 443.
-	c, err := New(httpClient(srv.URL, true, true, ssrf.WithAllowedPorts(ports...)), srv.URL, "test-token", testVersion, armed(),
+	c := New(httpClient(srv.URL, true, true, ssrf.WithAllowedPorts(ports...)), srv.URL, "test-token", testVersion, armed(),
 		slog.New(slog.DiscardHandler), httpclient.WithMaxAttempts(1))
-	if err != nil {
-		t.Fatalf("Setup: New = %v", err)
-	}
 	if _, err := c.CodeScanningAlerts(t.Context(), repo); err == nil || leaked.Load() != 0 {
 		t.Errorf("CodeScanningAlerts redirected to another port = %v with the token sent %d times, want an error and no token sent", err, leaked.Load())
 	}
@@ -751,11 +743,8 @@ func TestHTTPClient_dials_a_private_address_only_when_the_connection_allows_it(t
 			}
 			base := "http://forge.example.test:" + u.Port()
 			resolver := &loopbackResolver{}
-			c, err := New(httpClient(base, private, true, ssrf.WithResolver(resolver)), base, "test-token", testVersion, armed(),
+			c := New(httpClient(base, private, true, ssrf.WithResolver(resolver)), base, "test-token", testVersion, armed(),
 				slog.New(slog.DiscardHandler), httpclient.WithMaxAttempts(1))
-			if err != nil {
-				t.Fatalf("Setup: New = %v", err)
-			}
 			_, err = c.CodeScanningAlerts(t.Context(), repo)
 			if resolver.lookups.Load() == 0 {
 				t.Fatalf("CodeScanningAlerts resolved %s 0 times, want the dial to go through the resolver", base)
@@ -815,10 +804,7 @@ func meteredClient(t *testing.T, h http.HandlerFunc) (*Client, *spend.Meter) {
 	spent.Name(forge.ProductGitHub)
 	hc := httpclient.New(5 * time.Second)
 	hc.Transport = spent.Observe(http.DefaultTransport)
-	c, err := New(hc, srv.URL, "test-token", testVersion, armed(), slog.New(slog.DiscardHandler), httpclient.WithMaxAttempts(1))
-	if err != nil {
-		t.Fatalf("Setup: New = %v", err)
-	}
+	c := New(hc, srv.URL, "test-token", testVersion, armed(), slog.New(slog.DiscardHandler), httpclient.WithMaxAttempts(1))
 	return c, spent
 }
 
