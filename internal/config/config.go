@@ -31,7 +31,7 @@ import (
 	"github.com/cplieger/go/filesafe"
 	"github.com/cplieger/go/slogx"
 	"github.com/cplieger/go/yamlenv"
-	"go.yaml.in/yaml/v3"
+	"go.yaml.in/yaml/v4"
 )
 
 // defaultPath is the container-internal config file path.
@@ -375,36 +375,57 @@ func scalars(n *yaml.Node, path string, tokenField bool, visit func(path, value 
 // the token key of a connections entry is a token. The mappings a merge key
 // names are walked after the mapping's own keys at the same path, in order
 // and depth first (each one's own keys, then its merges), sharing walked so
-// the first to write a key wins. That is go-yaml's merge precedence, so the
-// walk visits exactly the values the decode keeps, at the paths it puts them.
-// A merge key is a "<<" the parser tagged !!merge (go-yaml's isMerge): the
-// decode fills any other key a !!merge tag marks, so the walk reads it too.
+// the first to write a key wins. That is go-yaml v4's default merge (its
+// effectiveMapping: conflicts "first", and of several merge keys in one
+// mapping only the last counts), so the walk visits exactly the values the
+// decode keeps, at the paths it puts them.
 func mappingScalars(n *yaml.Node, path string, walked map[string]bool, visit func(path, value string, token bool) bool) bool {
 	connection := strings.HasPrefix(path, "connections[") && !strings.Contains(path, ".")
-	var merged []*yaml.Node
+	var merge *yaml.Node
 	for i := 0; i+1 < len(n.Content); i += 2 {
 		k, v := n.Content[i], n.Content[i+1]
-		if k.Kind == yaml.ScalarNode && k.Value == "<<" && k.Tag == "!!merge" {
-			// The decode counts "<<" as written, so a merged mapping's
-			// quoted "<<" key is never filled.
-			walked["<<"] = true
-			merged = append(merged, mergeSources(v)...)
+		if isMerge(k) {
+			merge = v
 			continue
 		}
-		if walked[k.Value] {
+		name, ok := keyName(k)
+		if !ok || walked[name] {
 			continue
 		}
-		walked[k.Value] = true
-		if !scalars(v, strings.TrimPrefix(path+"."+k.Value, "."), connection && k.Value == "token", visit) {
+		walked[name] = true
+		if !scalars(v, strings.TrimPrefix(path+"."+name, "."), connection && name == "token", visit) {
 			return false
 		}
 	}
-	for _, m := range merged {
+	if merge == nil {
+		return true
+	}
+	for _, m := range mergeSources(merge) {
 		if !mappingScalars(m, path, walked, visit) {
 			return false
 		}
 	}
 	return true
+}
+
+// isMerge is go-yaml v4's merge-key test on a parsed key: any scalar tagged
+// !!merge, which an explicit tag gives any name. A quoted "<<" resolves to
+// !!str and is an ordinary key, which the strict decode refuses.
+func isMerge(k *yaml.Node) bool {
+	return k.Kind == yaml.ScalarNode && k.ShortTag() == "!!merge"
+}
+
+// keyName is the field name the decode reads from key k, through an alias or a
+// tag such as !!binary, and false for a key it skips (a null) or cannot read.
+func keyName(k *yaml.Node) (string, bool) {
+	if deref(k).ShortTag() == "!!null" {
+		return "", false
+	}
+	var name string
+	if err := k.Decode(&name); err != nil {
+		return "", false
+	}
+	return name, true
 }
 
 // mergeSources returns the mappings a merge key's value names, in order. The
