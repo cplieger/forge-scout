@@ -190,15 +190,8 @@ func fullPath(p string) bool {
 // written reports whether the rule at path writes key, directly or through a
 // YAML merge key.
 func (s source) written(path, key string) bool {
-	if _, ok := s[path+"."+key]; ok {
-		return true
-	}
-	for p := range s {
-		if strings.HasPrefix(p, path+".<<") && strings.HasSuffix(p, "."+key) {
-			return true
-		}
-	}
-	return false
+	_, ok := s[path+"."+key]
+	return ok
 }
 
 // titleError names what is wrong with a title expression, never the

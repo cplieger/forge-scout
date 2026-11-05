@@ -41,6 +41,11 @@ func FuzzLoad(f *testing.F) {
 	f.Add("connections:\n  - name: ${GITHUB_TOKEN}")
 	f.Add("connections: [1, 2]\n")
 	f.Add("a: &x [*x]\n")
+	f.Add(mergedConnections("    name: b\n    url: https://gitlab.com\n"))
+	f.Add("connections:\n  - <<: [{token: \"${FORGE_SCOUT_FUZZ_TOKEN}\"}, {url: \"${FORGE_SCOUT_FUZZ_TOKEN}\"}]\n    name: a\n    owners: [o]\n")
+	f.Add("connections:\n  - &c\n    <<: *c\n    name: a\n")
+	f.Add("connections:\n  - url: https://github.com\n    !!merge name: ${FORGE_SCOUT_FUZZ_TOKEN}\n    token: ${FORGE_SCOUT_FUZZ_TOKEN}\n    owners: [o]\n")
+	f.Add("connections:\n  - <<: {\"<<\": \"${FORGE_SCOUT_FUZZ_TOKEN}\", url: https://github.com}\n    name: a\n    token: ${GITHUB_TOKEN}\n    owners: [o]\n")
 	f.Add("")
 	f.Fuzz(func(t *testing.T, doc string) {
 		t.Parallel()
