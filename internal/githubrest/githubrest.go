@@ -1,8 +1,8 @@
 // Package githubrest reads the two GitHub REST routes forgeapi does not model:
 // a repository's open code-scanning alerts and its workflow definitions. Every
 // status is classified on its code, never on message text, through one table
-// of what each route's answers mean. Its reads go through forgeapi's read
-// cache, which revalidates a page it holds.
+// of what each route's answers mean. Its reads go through httpclient's
+// revalidation cache, which revalidates a page it holds.
 package githubrest
 
 import (
@@ -24,7 +24,6 @@ import (
 	"github.com/cplieger/forge-scout/internal/forge"
 	"github.com/cplieger/forge-scout/internal/ghquota"
 	"github.com/cplieger/forge-scout/internal/urlsafe"
-	"github.com/cplieger/forgeapi/readcache"
 	"github.com/cplieger/go/httpclient"
 	"github.com/cplieger/go/jsonx"
 	"github.com/cplieger/go/ssrf"
@@ -47,7 +46,7 @@ var errNotFound = errors.New("not found")
 type Client struct {
 	http    *http.Client
 	meter   *ghquota.Meter
-	cache   *readcache.Transport
+	cache   *httpclient.CacheRoundTripper
 	base    string
 	token   string
 	version string
@@ -61,7 +60,7 @@ type Client struct {
 // admitted by meter, the connection's quota, which sees its response. Its
 // transport sees each request as sent, a validator the read cache adds
 // included.
-func New(hc *http.Client, base, token, version string, meter *ghquota.Meter, logger *slog.Logger, retry ...httpclient.Option) (*Client, error) {
+func New(hc *http.Client, base, token, version string, meter *ghquota.Meter, logger *slog.Logger, retry ...httpclient.Option) *Client {
 	opts := make([]httpclient.DoOption, 0, len(retry)+2)
 	for _, o := range retry {
 		opts = append(opts, o)
@@ -75,13 +74,10 @@ func New(hc *http.Client, base, token, version string, meter *ghquota.Meter, log
 	// (https://docs.github.com/en/rest/using-the-rest-api/best-practices-for-using-the-rest-api#use-conditional-requests-if-appropriate).
 	// A read pages by number and reads no header of a 200, so a served
 	// answer holds none.
-	cache, err := readcache.NewTransport(admitting{next: meter.Observe(inner), meter: meter}, readcache.WithFreeNotModified(true))
-	if err != nil {
-		return nil, fmt.Errorf("github rest read cache: %w", err)
-	}
+	cache := httpclient.NewCacheRoundTripper(admitting{next: meter.Observe(inner), meter: meter}, httpclient.CacheConfig{FreeNotModified: true})
 	metered := *hc
 	metered.Transport = cache
-	return &Client{http: &metered, cache: cache, base: strings.TrimRight(base, "/"), token: token, version: version, retry: opts, meter: meter}, nil
+	return &Client{http: &metered, cache: cache, base: strings.TrimRight(base, "/"), token: token, version: version, retry: opts, meter: meter}
 }
 
 // ReadCache is what the client's read cache did since it was built.

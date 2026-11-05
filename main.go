@@ -205,11 +205,6 @@ func opener(base *slog.Logger) collect.Opener {
 		logger := collect.Scope(base, forge.ProductGitHub, c.Name)
 		hc := githubrest.HTTPClient(api, c.PrivateAddresses, c.AllowPlaintext, logger)
 		hc.Transport = spent.Observe(hc.Transport)
-		gh, err := githubrest.New(hc, api, c.Token, github.APIVersion, meter, logger)
-		if err != nil {
-			conn.Close()
-			return nil, nil, err
-		}
-		return conn, gh, nil
+		return conn, githubrest.New(hc, api, c.Token, github.APIVersion, meter, logger), nil
 	}
 }
