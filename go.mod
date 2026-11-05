@@ -12,8 +12,11 @@ require (
 	github.com/cplieger/go/slogx v1.0.0-dev.1
 	github.com/cplieger/go/ssrf v1.0.0-dev.1
 	github.com/cplieger/go/textsafe v1.0.0-dev.1
-	github.com/cplieger/go/yamlenv v1.0.0-dev.1
+	github.com/cplieger/go/yamlenv v1.0.0-dev.2
 	go.yaml.in/yaml/v3 v3.0.6
 )
 
-require github.com/cplieger/go/urlform v1.0.0-dev.1 // indirect
+require (
+	github.com/cplieger/go/urlform v1.0.0-dev.1 // indirect
+	go.yaml.in/yaml/v4 v4.0.0 // indirect
+)
