@@ -765,6 +765,46 @@ func TestLoad_judges_only_the_last_merge_key_of_a_mapping(t *testing.T) {
 	}
 }
 
+// TestLoad_names_a_key_as_the_decode_does pins the walk to the field name the
+// decode reads from a key, through an alias or a !!binary tag, and to the null
+// key it skips: otherwise a token written under such a key is judged as some
+// other value, and a token variable it names can reach a logged url.
+func TestLoad_names_a_key_as_the_decode_does(t *testing.T) {
+	t.Parallel()
+	lookup := env(map[string]string{"GITHUB_TOKEN": "test-token", "FORGE_SCOUT_SECRET": "opaque-credential", "X_TOKEN": "x-token-value"})
+	refused := []struct{ name, body string }{
+		{"alias_key", "connections:\n  - <<: {token: \"${GITHUB_TOKEN}\"}\n    name: a\n    owners: [&t token]\n    *t : \"${FORGE_SCOUT_SECRET}\"\n    url: \"https://forge.example/${FORGE_SCOUT_SECRET}\"\n"},
+		{"binary_key", "connections:\n  - <<: {token: \"${GITHUB_TOKEN}\"}\n    name: a\n    owners: [o]\n    !!binary dG9rZW4= : \"${FORGE_SCOUT_SECRET}\"\n    url: \"https://forge.example/${FORGE_SCOUT_SECRET}\"\n"},
+	}
+	for _, tc := range refused {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			_, _, err := load(writeConfig(t, tc.body), lookup)
+			if err == nil || !strings.Contains(err.Error(), "connections[1].url: a token variable is referenced outside token") || strings.Contains(err.Error(), "opaque-credential") {
+				t.Errorf("Load(%s) = %v, want the url refused for naming the token's variable, and no value", tc.name, err)
+			}
+		})
+	}
+	loaded := []struct{ name, body string }{
+		{"merged_binary_token", "connections:\n  - <<: {!!binary dG9rZW4= : \"${GITHUB_TOKEN}\"}\n    name: a\n    url: https://github.com\n    owners: [o]\n"},
+		{"merged_alias_token", "connections:\n  - name: a\n    url: https://github.com\n    owners: [&t token]\n    <<: {*t : \"${GITHUB_TOKEN}\"}\n"},
+		{"merged_null_key", "connections:\n  - name: a\n    <<: {~: \"${X_TOKEN}\", url: https://github.com}\n    token: ${GITHUB_TOKEN}\n    owners: [o]\n"},
+		{"null_key_holding_a_cycle", "connections:\n  - name: a\n    url: https://github.com\n    token: ${GITHUB_TOKEN}\n    owners: [o]\n    ~: &a [*a]\n"},
+	}
+	for _, tc := range loaded {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			cfg, _, err := load(writeConfig(t, tc.body), lookup)
+			if err != nil {
+				t.Fatalf("Load(%s) = %v, want it loaded", tc.name, err)
+			}
+			if got := cfg.Connections[0].Token; got != "test-token" {
+				t.Errorf("Load(%s) token = %q, want test-token", tc.name, got)
+			}
+		})
+	}
+}
+
 // TestDecode_refuses_a_quoted_merge_key_in_a_merged_mapping pins that go-yaml
 // v4 merges a quoted "<<" in as an ordinary key, which the strict decode
 // refuses as unknown, so nothing reads its value.
