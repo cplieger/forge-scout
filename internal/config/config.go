@@ -373,16 +373,21 @@ func scalars(n *yaml.Node, path string, tokenField bool, visit func(path, value 
 
 // mappingScalars walks the values of a mapping's keys not yet in walked; only
 // the token key of a connections entry is a token. The mappings a merge key
-// names are walked at the same path after the mapping's own keys, in order,
-// each with its own merges first, sharing walked so the first to write a key
-// wins. That is go-yaml's merge precedence, so the walk visits exactly the
-// values the decode keeps, at the paths it puts them.
+// names are walked after the mapping's own keys at the same path, in order
+// and depth first (each one's own keys, then its merges), sharing walked so
+// the first to write a key wins. That is go-yaml's merge precedence, so the
+// walk visits exactly the values the decode keeps, at the paths it puts them.
+// A merge key is a "<<" the parser tagged !!merge (go-yaml's isMerge): the
+// decode fills any other key a !!merge tag marks, so the walk reads it too.
 func mappingScalars(n *yaml.Node, path string, walked map[string]bool, visit func(path, value string, token bool) bool) bool {
 	connection := strings.HasPrefix(path, "connections[") && !strings.Contains(path, ".")
 	var merged []*yaml.Node
 	for i := 0; i+1 < len(n.Content); i += 2 {
 		k, v := n.Content[i], n.Content[i+1]
-		if k.Kind == yaml.ScalarNode && k.Tag == "!!merge" {
+		if k.Kind == yaml.ScalarNode && k.Value == "<<" && k.Tag == "!!merge" {
+			// The decode counts "<<" as written, so a merged mapping's
+			// quoted "<<" key is never filled.
+			walked["<<"] = true
 			merged = append(merged, mergeSources(v)...)
 			continue
 		}
@@ -403,24 +408,20 @@ func mappingScalars(n *yaml.Node, path string, walked map[string]bool, visit fun
 }
 
 // mergeSources returns the mappings a merge key's value names, in order. The
-// decode refuses any other value, so the walk never meets one.
+// decode accepts only a mapping or a sequence of mappings there, so every
+// node it returns is a mapping.
 func mergeSources(v *yaml.Node) []*yaml.Node {
 	v = deref(v)
-	if v.Kind == yaml.MappingNode {
+	if v.Kind != yaml.SequenceNode {
 		return []*yaml.Node{v}
 	}
-	var out []*yaml.Node
-	if v.Kind == yaml.SequenceNode {
-		for _, e := range v.Content {
-			if e = deref(e); e.Kind == yaml.MappingNode {
-				out = append(out, e)
-			}
-		}
+	out := make([]*yaml.Node, 0, len(v.Content))
+	for _, e := range v.Content {
+		out = append(out, deref(e))
 	}
 	return out
 }
 
-// deref returns the node an alias names, and any other node itself.
 func deref(n *yaml.Node) *yaml.Node {
 	if n.Kind == yaml.AliasNode && n.Alias != nil {
 		return n.Alias

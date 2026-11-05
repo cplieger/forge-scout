@@ -708,6 +708,55 @@ func TestLoad_refuses_a_token_variable_merged_outside_token(t *testing.T) {
 	}
 }
 
+func TestLoad_refuses_a_token_variable_under_a_merge_tag_on_another_key(t *testing.T) {
+	t.Parallel()
+	tests := []struct{ name, body, where string }{
+		{"url", "connections:\n  - name: a\n    !!merge url: \"${X_TOKEN}\"\n    token: ${GITHUB_TOKEN}\n    owners: [o]\n", "connections[1].url"},
+		{"owners", "connections:\n  - name: a\n    url: https://github.com\n    token: ${GITHUB_TOKEN}\n    !!merge owners: [\"${X_TOKEN}\"]\n", "connections[1].owners[1]"},
+		{"name", "connections:\n  - url: https://github.com\n    !!merge name: ${X_TOKEN}\n    token: ${GITHUB_TOKEN}\n    owners: [o]\n", "connections[1].name"},
+		{"bot_authors", "connections:\n  - name: a\n    url: https://github.com\n    token: ${GITHUB_TOKEN}\n    owners: [o]\n    !!merge bot_authors: [\"${X_TOKEN}\"]\n", "connections[1].bot_authors[1]"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			_, _, err := load(writeConfig(t, tc.body), env(map[string]string{"GITHUB_TOKEN": "test-token", "X_TOKEN": "x-token-value"}))
+			if err == nil || !strings.Contains(err.Error(), tc.where+": a token variable is referenced outside token") || strings.Contains(err.Error(), "x-token-value") {
+				t.Errorf("Load(%s) = %v, want a refusal naming %s, the key the decode fills, and no value", tc.name, err, tc.where)
+			}
+		})
+	}
+}
+
+func TestDecode_skips_a_quoted_merge_key_in_a_merged_mapping(t *testing.T) {
+	t.Parallel()
+	body := "connections:\n  - <<: {\"<<\": \"${X_TOKEN}\", url: https://github.com}\n    name: a\n    token: ${GITHUB_TOKEN}\n    owners: [o]\n"
+	lookup := env(map[string]string{"GITHUB_TOKEN": "test-token", "X_TOKEN": "x-token-value"})
+	_, src, _, err := decode(writeConfig(t, body), lookup)
+	if err != nil {
+		t.Fatalf("decode = %v, want nil: the decode skips the quoted \"<<\" key, so nothing reads its value", err)
+	}
+	if src["connections[1].url"] != "https://github.com" {
+		t.Errorf("source url = %q, want the merged https://github.com", src["connections[1].url"])
+	}
+	for path := range src {
+		if strings.Contains(path, "<<") {
+			t.Errorf("source has the path %s, which no decoded value has", path)
+		}
+	}
+}
+
+func TestLoad_a_merge_tag_on_the_token_key_leaves_the_token(t *testing.T) {
+	t.Parallel()
+	body := "connections:\n  - name: a\n    url: https://github.com\n    !!merge token: ${GITHUB_TOKEN}\n    owners: [o]\n"
+	cfg, _, err := load(writeConfig(t, body), tokenEnv)
+	if err != nil {
+		t.Fatalf("Load = %v, want it loaded: the decode fills token from a !!merge-tagged token key", err)
+	}
+	if got := cfg.Connections[0].Token; got != "test-token" {
+		t.Errorf("Load token = %q, want test-token expanded", got)
+	}
+}
+
 func TestLoad_an_own_key_replaces_a_merged_value_whole(t *testing.T) {
 	t.Parallel()
 	body := "connections:\n  - &c\n    name: a\n    url: https://github.com\n    token: ${GITHUB_TOKEN}\n    owners: [o1, o2]\n    exclude: [{author: a, label: l}]\n" +
