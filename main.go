@@ -25,7 +25,7 @@ import (
 	"github.com/cplieger/forge-scout/internal/githubrest"
 	"github.com/cplieger/forge-scout/internal/runstate"
 	"github.com/cplieger/forge-scout/internal/spend"
-	"github.com/cplieger/forgeapi/github"
+	"github.com/cplieger/forgeapi/v2/github"
 	"github.com/cplieger/go/health"
 	"github.com/cplieger/go/scheduler"
 	"github.com/cplieger/go/slogx"
