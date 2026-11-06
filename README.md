@@ -134,7 +134,7 @@ The image is distroless, with no shell, and runs as a non-root user. It writes o
 
 ## Troubleshooting
 
-The healthcheck runs `/forge-scout health`, which checks that the scan loop refreshed its marker file within the last three scan intervals plus one scan at its limit of twice the interval, 75 minutes at the default. Unhealthy means the loop stopped, so restart the container. The container stays healthy through a failed scan, a rejected token or a spent budget. Those appear in the log, and the bundled alert rules fire on them.
+The healthcheck runs `/forge-scout health`, which checks that the scan loop refreshed its marker file within the last three scan intervals plus one scan at its limit of twice the interval, 75 minutes at the default. Unhealthy means the loop stopped, so restart the container. The container stays healthy through a failed scan, a rejected token or a spent budget. Those appear in the log, and the alert rules in [Monitoring and alerts](docs/monitoring.md#alerting) fire on them. An unhealthy container notifies nobody by itself. `ForgeScoutScanStalled` is the alert for a stopped loop, and [Knowing the app is alive](docs/monitoring.md#knowing-the-app-is-alive) says who is told.
 
 - If the container exits at start with `invalid configuration`, the error names the key or the connection to fix. A missing file names `/config/config.yaml`.
 - If the log shows `"cause":"token_invalid"`, that forge rejected the token. Check that it has not expired.
@@ -152,7 +152,7 @@ The healthcheck runs `/forge-scout health`, which checks that the scan loop refr
 
 ## Monitoring
 
-forge-scout writes one JSON log line for each open pull request, issue, alert and observed run state, plus a `scan complete` summary for each connection after each scan. The bundled dashboard needs Grafana 13.2 or newer and reads those lines from Loki, and two Loki alert rules fire when scans go blind or stop. [Monitoring and alerts](docs/monitoring.md) lists the log fields, the dashboard and the rules.
+forge-scout writes one JSON log line for each open pull request, issue, alert and observed run state, plus a `scan complete` summary for each connection after each scan. The bundled dashboard needs Grafana 13.2 or newer and reads those lines from Loki, and two Loki alert rules fire when scans go blind or stop. [Monitoring and alerts](docs/monitoring.md) lists the log fields, the dashboard and the rules, and says who tells you the scan loop stopped.
 
 ## Documentation
 
