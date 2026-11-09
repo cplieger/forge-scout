@@ -1,5 +1,5 @@
-github.com/cplieger/forgeapi/v2 v2.0.0-dev.6 h1:x4zw8fbodRb786a0LRN+/40K7p+pjospJTID/D9DT2w=
-github.com/cplieger/forgeapi/v2 v2.0.0-dev.6/go.mod h1:F9p3XjKhEERkHh9L2fx7uKTcsuqD/TxZi7ZKPkf/88o=
+github.com/cplieger/forgeapi/v2 v2.0.0-dev.7 h1:UMAKjikBbVCotZTuEjaF2F+0BTJ43WrTTKogTYDgDwM=
+github.com/cplieger/forgeapi/v2 v2.0.0-dev.7/go.mod h1:F9p3XjKhEERkHh9L2fx7uKTcsuqD/TxZi7ZKPkf/88o=
 github.com/cplieger/go/filesafe v1.0.0 h1:V63mC2Kc1PlbAKhiCXMA5WiellXJtWPtNJwTG2Q37us=
 github.com/cplieger/go/filesafe v1.0.0/go.mod h1:Pu9t7x6mRQwXm09EdWaQvVK++fpjgGP7+58XiMxGYks=
 github.com/cplieger/go/health v1.0.0 h1:MK3skKEoRhmsrt64O/OSbpbL9Dib0drAeWLQLLhjmPU=
