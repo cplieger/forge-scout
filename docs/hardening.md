@@ -40,6 +40,7 @@ The image is built on distroless static and runs as the `nonroot` user, uid 6553
 | cplieger/forgeapi | [forgeapi](https://github.com/cplieger/forgeapi), the client for every forge |
 | cplieger/go/urlform | [urlform](https://github.com/cplieger/go/tree/main/urlform), the check forgeapi runs on each connection's `url` before it sends a request |
 | cplieger/go/httpclient | [httpclient](https://github.com/cplieger/go/tree/main/httpclient), the retrying HTTP client under forgeapi and the GitHub code-scanning and workflow reads |
+| cplieger/go/httpcache | [httpcache](https://github.com/cplieger/go/tree/main/httpcache), the revalidation cache under forgeapi and the GitHub code-scanning and workflow reads |
 | cplieger/go/jsonx | [jsonx](https://github.com/cplieger/go/tree/main/jsonx), the size and item limits on decoded responses, forgeapi's and the GitHub code-scanning and workflow pages |
 | cplieger/go/ssrf | [ssrf](https://github.com/cplieger/go/tree/main/ssrf), the private-address check on every connection's requests |
 | cplieger/go/yamlenv | [yamlenv](https://github.com/cplieger/go/tree/main/yamlenv), the config file decode: `${NAME}` expansion, unknown keys refused, and decode errors that never quote an expanded secret |
