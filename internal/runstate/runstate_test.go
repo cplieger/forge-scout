@@ -630,7 +630,7 @@ func TestCommit_records_nothing_of_a_read_whose_delivery_stopped_short(t *testin
 func stallWrites(t *testing.T) (release func()) {
 	t.Helper()
 	stalled := make(chan struct{})
-	writeState = func(ctx context.Context, path string, data []byte, opts ...filesafe.Option) (filesafe.Result, error) {
+	writeState = func(ctx context.Context, path string, data []byte, opts ...filesafe.WriteOption) (filesafe.Result, error) {
 		<-stalled
 		return filesafe.WriteFile(context.WithoutCancel(ctx), path, data, opts...)
 	}
@@ -840,7 +840,7 @@ func TestCommit_a_failed_write_delivers_its_changes_once_and_a_later_write_store
 func TestCommit_a_change_whose_write_never_landed_is_delivered_again_after_a_restart(t *testing.T) {
 	s := open(t, t.TempDir())
 	commit(t, s, "gh", read(run(1, forge.RunFailing, t0)))
-	writeState = func(context.Context, string, []byte, ...filesafe.Option) (filesafe.Result, error) {
+	writeState = func(context.Context, string, []byte, ...filesafe.WriteOption) (filesafe.Result, error) {
 		return filesafe.Result{}, errors.New("disk full")
 	}
 	t.Cleanup(func() { writeState = filesafe.WriteFile })
@@ -859,7 +859,7 @@ func TestCommit_a_change_whose_write_never_landed_is_delivered_again_after_a_res
 
 func TestCommit_a_write_that_is_not_durable_delivers_its_changes_and_a_restart_does_not_replay_them(t *testing.T) {
 	s := open(t, t.TempDir())
-	writeState = func(ctx context.Context, path string, data []byte, opts ...filesafe.Option) (filesafe.Result, error) {
+	writeState = func(ctx context.Context, path string, data []byte, opts ...filesafe.WriteOption) (filesafe.Result, error) {
 		res, err := filesafe.WriteFile(ctx, path, data, opts...)
 		res.Durable = false
 		return res, err
@@ -881,7 +881,7 @@ func TestCommit_a_write_that_is_not_durable_delivers_its_changes_and_a_restart_d
 
 func TestCommit_a_write_that_never_becomes_durable_delivers_each_change_once(t *testing.T) {
 	s := open(t, t.TempDir())
-	writeState = func(ctx context.Context, path string, data []byte, opts ...filesafe.Option) (filesafe.Result, error) {
+	writeState = func(ctx context.Context, path string, data []byte, opts ...filesafe.WriteOption) (filesafe.Result, error) {
 		res, err := filesafe.WriteFile(ctx, path, data, opts...)
 		res.Durable = false
 		return res, err
