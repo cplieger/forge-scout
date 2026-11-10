@@ -22,7 +22,7 @@ forge-scout shows you what is waiting for you across all your repositories and f
 
 forge-scout is built for people with repositories on one or more forges, private ones included: github.com or GitHub Enterprise Server, gitlab.com or a self-managed GitLab, and Gitea or Forgejo instances. It checks every repository of the owners you name every 15 minutes.
 
-forge-scout reports through its log, so its dashboard and alerts come from your Grafana, Loki and Alertmanager, which the [monitoring guide](https://github.com/cplieger/docs/blob/main/docs/monitoring.md#the-smallest-stack-sends-notifications-only) sets up. You also need an access token for each forge, read-only where the forge allows it.
+forge-scout reports through its log, so its dashboard and alerts come from your Grafana, Loki and Alertmanager, which the [monitoring guide](https://github.com/cplieger/docs/blob/main/docs/monitoring.md#the-starting-stack) sets up. You also need an access token for each forge, read-only where the forge allows it.
 
 Other tools suit other needs:
 
@@ -66,7 +66,7 @@ services:
 3. Save [`config.example.yaml`](config.example.yaml) beside `compose.yaml`, then run `mkdir -p config && cp config.example.yaml config/config.yaml`. In `config/config.yaml`, set each connection's `url` and `owners`, and delete the connections you do not use.
 4. Add each token variable the config names to the `environment:` block of `compose.yaml`.
 5. Run `mkdir -p data && sudo chown 1000:1000 data`, with your `PUID` and `PGID` in place of 1000 if you set them, then `docker compose up -d`.
-6. Have your log collector [send the container's logs to Loki](https://github.com/cplieger/docs/blob/main/docs/monitoring.md#the-smallest-stack-sends-notifications-only) with the label `container="forge-scout"`, which every dashboard panel selects on.
+6. Have your log collector [send the container's logs to Loki](https://github.com/cplieger/docs/blob/main/docs/monitoring.md#the-starting-stack) with the label `container="forge-scout"`, which every dashboard panel selects on.
 7. In Grafana 13.2 or newer, [import](https://github.com/cplieger/docs/blob/main/docs/monitoring.md#importing-an-apps-dashboard) [`grafana-dashboard.json`](grafana-dashboard.json). It reads from your default Loki data source.
 
 Run `docker logs forge-scout`. You should see one line with `"msg":"scan complete"` and `"degraded":false` for each connection. If a forge rejected the token or could not be reached, its connection logs `"msg":"repo discovery failed"`, then `"msg":"scan degraded"`, and still ends with `"msg":"scan complete"`, but with `"degraded":true`. The `connection` field names which one. A connection that stopped early logs `"msg":"scan stopped"` and no `scan complete`.
@@ -134,7 +134,7 @@ The image is distroless, with no shell, and runs as a non-root user. It writes o
 
 ## Troubleshooting
 
-The healthcheck runs `/forge-scout health`, which checks that the scan loop refreshed its marker file within the last three scan intervals plus one scan at its limit of twice the interval, 75 minutes at the default. Unhealthy means the loop stopped, so restart the container. The container stays healthy through a failed scan, a rejected token or a spent budget. Those appear in the log, and the bundled alert rules fire on them.
+The healthcheck runs `/forge-scout health`, which checks that the scan loop refreshed its marker file within the last three scan intervals plus one scan at its limit of twice the interval, 75 minutes at the default. Unhealthy means the loop stopped, so restart the container. The container stays healthy through a failed scan, a rejected token or a spent budget. Those appear in the log, and the alert rules in [Monitoring and alerts](docs/monitoring.md#alerting) fire on them. An unhealthy container notifies nobody by itself. `ForgeScoutScanStalled` is the alert for a stopped loop, and [Knowing the app is alive](docs/monitoring.md#knowing-the-app-is-alive) says who is told.
 
 - If the container exits at start with `invalid configuration`, the error names the key or the connection to fix. A missing file names `/config/config.yaml`.
 - If the log shows `"cause":"token_invalid"`, that forge rejected the token. Check that it has not expired.
@@ -152,7 +152,7 @@ The healthcheck runs `/forge-scout health`, which checks that the scan loop refr
 
 ## Monitoring
 
-forge-scout writes one JSON log line for each open pull request, issue, alert and observed run state, plus a `scan complete` summary for each connection after each scan. The bundled dashboard needs Grafana 13.2 or newer and reads those lines from Loki, and two Loki alert rules fire when scans go blind or stop. [Monitoring and alerts](docs/monitoring.md) lists the log fields, the dashboard and the rules.
+forge-scout writes one JSON log line for each open pull request, issue, alert and observed run state, plus a `scan complete` summary for each connection after each scan. The bundled dashboard needs Grafana 13.2 or newer and reads those lines from Loki, and two Loki alert rules fire when scans go blind or stop. [Monitoring and alerts](docs/monitoring.md) lists the log fields, the dashboard and the rules, and says who tells you the scan loop stopped.
 
 ## Documentation
 

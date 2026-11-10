@@ -379,11 +379,12 @@ func (*Collector) emitDegraded(sc *scan, r *connResult) {
 }
 
 // emitStopped logs a stopped connection, with the read state of every
-// family. The first budget stop logged in a budget window is WARN and the
-// repeats until it renews INFO, the level of scan complete, so each stays
-// the stall alert's heartbeat. A budget stop with no window known, and a
-// stop at the limit, are always WARN. A stop is degraded when it escalates
-// or a read before it degraded; a clean budget stop works as intended.
+// family. The first budget stop in a budget window is news, so WARN; its
+// repeats until the window renews are expected, so INFO, like scan complete.
+// Every stop line also stays the stall alert's heartbeat. A budget stop with
+// no window known, and a stop at the limit, are always WARN. A stop is
+// degraded when it escalates or a read before it degraded; a clean budget
+// stop works as intended.
 func (c *Collector) emitStopped(sc *scan, r *connResult, escalated bool) {
 	stop := r.ledger.stop
 	level := slog.LevelWarn
