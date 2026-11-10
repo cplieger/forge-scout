@@ -374,8 +374,8 @@ func segments(path string) (owner, name string, err error) {
 	return owner, name, nil
 }
 
-// get reads one page's body under the client's retry policy, which repeats a
-// 5xx and the transport errors httpclient.IsTransient accepts.
+// get reads one page's body under the client's retry policy, which repeats
+// the answers and transport errors httpclient.IsTransient accepts.
 func (c *Client) get(ctx context.Context, route string, q url.Values) ([]byte, error) {
 	return httpclient.Do(ctx, func(ctx context.Context) ([]byte, error) {
 		return c.attempt(ctx, c.base+route+"?"+q.Encode())
@@ -419,11 +419,13 @@ func (c *Client) statusError(resp *http.Response) error {
 }
 
 // statusError classifies a non-2xx answer on its status code and headers,
-// never its body. A 5xx is marked transient so the retry loop repeats it. A
-// 403 with X-RateLimit-Remaining at 0 or a Retry-After header is a rate
-// limit. Any other 403 is forge.ErrForbidden, which GitHub also answers for a
-// secondary limit that sets neither header, so the quota meter sends no more
-// requests after it (see ghquota.Meter.Admit).
+// never its body. A 403 with X-RateLimit-Remaining at 0 or a Retry-After
+// header is a rate limit. Any other 403 is forge.ErrForbidden, which GitHub
+// also answers for a secondary limit that sets neither header, so the quota
+// meter sends no more requests after it (see ghquota.Meter.Admit). Every other
+// answer is httpclient's *StatusError, which the retry loop repeats when
+// httpclient.IsRetryableStatus accepts its code: 408 and a 5xx other than 501,
+// 505, 506, 508, 510 and 511.
 func statusError(resp *http.Response) error {
 	switch code := resp.StatusCode; {
 	case code >= 200 && code < 300:
@@ -438,8 +440,6 @@ func statusError(resp *http.Response) error {
 		return errNotFound
 	case code == http.StatusTooManyRequests:
 		return fmt.Errorf("%w: %w", forge.ErrRateLimited, httpclient.CheckStatus(resp))
-	case code >= 500:
-		return httpclient.MarkTransient(httpclient.CheckStatus(resp))
 	default:
 		return httpclient.CheckStatus(resp)
 	}
