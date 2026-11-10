@@ -484,6 +484,37 @@ func TestCodeScanningAlerts_retries_a_server_error(t *testing.T) {
 	}
 }
 
+// A status answer is retried exactly when httpclient's one rule says so: 408
+// and a 5xx whose answer can change, never 501, 505 or 511, whose answer repeats.
+func TestCodeScanningAlerts_retries_by_the_shared_status_rule(t *testing.T) {
+	for _, tc := range []struct {
+		status int
+		calls  int32
+	}{
+		{http.StatusRequestTimeout, 2},
+		{http.StatusInternalServerError, 2},
+		{http.StatusBadGateway, 2},
+		{http.StatusNotImplemented, 1},
+		{http.StatusHTTPVersionNotSupported, 1},
+		{http.StatusNetworkAuthenticationRequired, 1},
+	} {
+		t.Run(strconv.Itoa(tc.status), func(t *testing.T) {
+			var calls atomic.Int32
+			c := newClientWith(t, func(w http.ResponseWriter, _ *http.Request) {
+				if calls.Add(1) == 1 {
+					w.WriteHeader(tc.status)
+					return
+				}
+				io.WriteString(w, alertsPage(1, 1))
+			}, httpclient.WithMaxAttempts(2), httpclient.WithBaseDelay(time.Millisecond))
+			_, _ = c.CodeScanningAlerts(t.Context(), repo)
+			if got := calls.Load(); got != tc.calls {
+				t.Errorf("a %d answer drew %d calls, want %d", tc.status, got, tc.calls)
+			}
+		})
+	}
+}
+
 // reporting answers with GitHub's rate-limit headers at remaining(n) for the
 // n-th request, with the window renewing at reset, then serves h.
 func reporting(remaining func(n int) int, reset time.Time, h http.HandlerFunc) http.HandlerFunc {
