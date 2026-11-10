@@ -6,12 +6,12 @@ require (
 	github.com/cplieger/forgeapi/v2 v2.0.0-dev.17
 	github.com/cplieger/go/filesafe v1.1.0-dev.1
 	github.com/cplieger/go/health v1.1.0-dev.1
-	github.com/cplieger/go/httpcache v1.1.0-dev.4
+	github.com/cplieger/go/httpcache v1.1.0-dev.5
 	github.com/cplieger/go/httpclient v1.2.0-dev.1
 	github.com/cplieger/go/jsonx v1.1.0-dev.1
 	github.com/cplieger/go/scheduler v1.1.0-dev.1
 	github.com/cplieger/go/slogx v1.1.0-dev.1
-	github.com/cplieger/go/ssrf v1.1.0-dev.4
+	github.com/cplieger/go/ssrf v1.1.0-dev.5
 	github.com/cplieger/go/textsafe v1.1.0-dev.1
 	github.com/cplieger/go/yamlenv v1.1.0-dev.1
 	go.yaml.in/yaml/v4 v4.0.0
