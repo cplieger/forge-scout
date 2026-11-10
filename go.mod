@@ -3,7 +3,7 @@ module github.com/cplieger/forge-scout
 go 1.27.3
 
 require (
-	github.com/cplieger/forgeapi/v2 v2.0.0-dev.14
+	github.com/cplieger/forgeapi/v2 v2.0.0-dev.15
 	github.com/cplieger/go/filesafe v1.0.0
 	github.com/cplieger/go/health v1.0.0
 	github.com/cplieger/go/httpcache v1.1.0-dev.3
