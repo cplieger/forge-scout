@@ -424,8 +424,7 @@ func (c *Client) statusError(resp *http.Response) error {
 // also answers for a secondary limit that sets neither header, so the quota
 // meter sends no more requests after it (see ghquota.Meter.Admit). Every other
 // answer is httpclient's *StatusError, which the retry loop repeats when
-// httpclient.IsRetryableStatus accepts its code: 408 and a 5xx other than 501,
-// 505, 506, 508, 510 and 511.
+// httpclient.IsRetryableStatus accepts its code.
 func statusError(resp *http.Response) error {
 	switch code := resp.StatusCode; {
 	case code >= 200 && code < 300:
