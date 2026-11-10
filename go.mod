@@ -1,6 +1,6 @@
 module github.com/cplieger/forge-scout
 
-go 1.27.3
+go 1.27.4
 
 require (
 	github.com/cplieger/forgeapi/v2 v2.0.0-dev.15
