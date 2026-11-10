@@ -3,11 +3,11 @@ module github.com/cplieger/forge-scout
 go 1.27.3
 
 require (
-	github.com/cplieger/forgeapi/v2 v2.0.0-dev.11
+	github.com/cplieger/forgeapi/v2 v2.0.0-dev.13
 	github.com/cplieger/go/filesafe v1.0.0
 	github.com/cplieger/go/health v1.0.0
 	github.com/cplieger/go/httpcache v1.1.0-dev.2
-	github.com/cplieger/go/httpclient v1.1.0-dev.2
+	github.com/cplieger/go/httpclient v1.1.0
 	github.com/cplieger/go/jsonx v1.0.0
 	github.com/cplieger/go/scheduler v1.0.0
 	github.com/cplieger/go/slogx v1.0.0
@@ -17,4 +17,4 @@ require (
 	go.yaml.in/yaml/v4 v4.0.0
 )
 
-require github.com/cplieger/go/urlform v1.1.0-dev.1 // indirect
+require github.com/cplieger/go/urlform v1.1.0 // indirect
