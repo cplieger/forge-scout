@@ -92,7 +92,11 @@ func runDaemon(ctx context.Context, logLevel *slog.LevelVar, base *slog.Logger, 
 	// The verdict is loop liveness only: a bad token or a blind signal is
 	// reported on the log channel, since a restart fixes neither.
 	st := health.NewStatus(health.WithMarker(marker))
+	// The drain starts at the cancel, so a scan it interrupts cannot report
+	// healthy; AfterFunc's goroutine may still be pending at return, so the
+	// defer is what removes the marker before the process exits.
 	context.AfterFunc(ctx, st.BeginDrain)
+	defer st.BeginDrain()
 
 	collector := newCollector(ctx, &cfg, base, store)
 	defer collector.Close()
