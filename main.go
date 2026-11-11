@@ -4,7 +4,7 @@
 // structured JSON log lines.
 //
 // main is the composition root: config, the forge connections, the run state
-// store, the collector and the health marker. All logic lives in internal/*.
+// store, the collector and the health status. All logic lives in internal/*.
 package main
 
 import (

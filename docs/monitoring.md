@@ -301,9 +301,9 @@ In a container the scan always runs in the main process, so these rules apply to
 
 forge-scout opens no port, so nothing outside the container can probe it. Load the stall rule, or watch Docker health.
 
-**What healthy means.** The scan loop refreshed its health marker within the last three scan intervals plus one scan at its limit of twice the interval, 75 minutes at the default `scan_interval` of 15m. A forge that is down, a rejected token or a spent budget never makes the container unhealthy. Those show in the log as `scan degraded` or `scan stopped`, and `ForgeScoutScanDegraded` reports a connection whose scans stay degraded.
+**What healthy means.** The scan loop refreshed its health file within the last three scan intervals plus one scan at its limit of twice the interval, 75 minutes at the default `scan_interval` of 15m. A forge that is down, a rejected token or a spent budget never makes the container unhealthy. Those show in the log as `scan degraded` or `scan stopped`, and `ForgeScoutScanDegraded` reports a connection whose scans stay degraded.
 
-**Docker health.** The image checks itself every 30 seconds with `/forge-scout health`, which reads the health file the scan loop refreshes. Docker marks the container unhealthy after 3 failures, and allows 15 seconds after a start. Docker's health status notifies nobody on its own, and Docker does not restart an unhealthy container. Unhealthy is the signal to restart it.
+**Docker health.** The image checks itself every 30 seconds with `/forge-scout health`, which reads the health file the scan loop refreshes at `/dev/shm/forge-scout.healthy`. If that file cannot be written, as under `ipc: none`, the check passes and the log says so once. Docker marks the container unhealthy after 3 failures, and allows 15 seconds after a start. Docker's health status notifies nobody on its own, and Docker does not restart an unhealthy container. Unhealthy is the signal to restart it.
 
 **Who is told.**
 
@@ -312,4 +312,4 @@ forge-scout opens no port, so nothing outside the container can probe it. Load t
 | Loki with these rules | `ForgeScoutScanStalled`, after 55 minutes with no finished scan | `ForgeScoutScanStalled`, after 55 minutes |
 | A metric store without Loki, or Docker or Unraid only | Something that watches Docker health sees the container exit, and the restart policy restarts it | Something that watches Docker health sees it turn unhealthy after 75 minutes |
 
-**One-shot scans.** `forge-scout trigger` exits 0 when every connection read every signal its forge has whole, and 1 otherwise, as [One-shot scans](configuration.md#one-shot-scans) lists. A one-shot scan never touches the health marker. If you run `trigger` scans from cron on a host, the lines land in your scheduler's output and not in a `forge-scout` container stream. Point the rule selectors there, and alert on the job's exit code for failed scans.
+**One-shot scans.** `forge-scout trigger` exits 0 when every connection read every signal its forge has whole, and 1 otherwise, as [One-shot scans](configuration.md#one-shot-scans) lists. A one-shot scan never touches the health file. If you run `trigger` scans from cron on a host, the lines land in your scheduler's output and not in a `forge-scout` container stream. Point the rule selectors there, and alert on the job's exit code for failed scans.
