@@ -118,7 +118,7 @@ func TestScan_a_stopped_connection_is_an_incomplete_scan(t *testing.T) {
 			t.Run(at.name+"_"+stop.name, func(t *testing.T) {
 				ep := githubEndpoint("gh")
 				at.setup(ep, stop.err)
-				if got := newHarness(t, ep).scan(t); got != Incomplete {
+				if got := newHarness(t, ep).scan(t); got != incomplete {
 					t.Errorf("Scan with the %s read stopped (%s) = %s, want incomplete: the signals after it were not read", at.name, stop.name, got)
 				}
 			})

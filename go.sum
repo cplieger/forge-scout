@@ -2,8 +2,8 @@ github.com/cplieger/forgeapi/v2 v2.0.0-dev.21 h1:Dq+TaY6pxs7+N/2j4ycpCRC9mZcKhuP
 github.com/cplieger/forgeapi/v2 v2.0.0-dev.21/go.mod h1:1EzoznbBYvpeparzBiikzi/cSXWTP9+F03/iTpVrO0M=
 github.com/cplieger/go/filesafe v1.1.0 h1:zCInOHIkszZQKNxIQvPgaFg592E5J27+/2hfbPmzEfA=
 github.com/cplieger/go/filesafe v1.1.0/go.mod h1:ji4TnJD8S8kgKelJlCQxlHyX0UXQGTW1ylSBqH5xqhI=
-github.com/cplieger/go/health v1.1.0 h1:vG4wM0JVBXvDXxGm9fnhyn8yA0BuiyB99LE3CPulA4s=
-github.com/cplieger/go/health v1.1.0/go.mod h1:7eOprE7L510iSRZBJabPD4V06TftKymjdtLnLTZPTiY=
+github.com/cplieger/go/health/v2 v2.0.0-dev.1 h1:/bKlni3Du3Ocp82mQfMrV1wrfX0cp8nCnEN/UqmCtV0=
+github.com/cplieger/go/health/v2 v2.0.0-dev.1/go.mod h1:Dmp78r+0ZHF2xMfOQqZ7c5pBiZF1el3QhLHA1y9um2A=
 github.com/cplieger/go/httpcache v1.1.0 h1:v5BOjRilWhWMKvi9ygNgfw/q/SufZLcO6y/CSHzk8Gs=
 github.com/cplieger/go/httpcache v1.1.0/go.mod h1:RRV3+h+xRN2W+/0GemF1wEqKLEun6sqPleyBI6zDcL4=
 github.com/cplieger/go/httpclient v1.2.0 h1:E+lbIpiNkUkcq3fxdMDYn116cwx6tU1XWmn4mDdBGU0=

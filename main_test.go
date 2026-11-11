@@ -946,6 +946,57 @@ func TestHealthLease_covers_three_intervals_and_one_scan_at_its_limit(t *testing
 	}
 }
 
+// TestMarkerPath_is_the_apps_own_file_in_dev_shm pins the file the daemon
+// writes and the health subcommand reads: /dev/shm stays writable under a
+// read-only root filesystem, and the app's name keeps it apart from a
+// neighbour sharing that folder.
+func TestMarkerPath_is_the_apps_own_file_in_dev_shm(t *testing.T) {
+	if want := "/dev/shm/forge-scout.healthy"; markerPath != want {
+		t.Errorf("markerPath = %q, want %q", markerPath, want)
+	}
+}
+
+// TestRunDaemon_keeps_the_marker_while_it_runs_and_removes_it_at_shutdown
+// runs the daemon against a GitHub fake until its first scan, then stops it.
+func TestRunDaemon_keeps_the_marker_while_it_runs_and_removes_it_at_shutdown(t *testing.T) {
+	rec := capture.Default(t)
+	gh := forgeconntest.New(forgeconntest.GitHub, world("acme"))
+	t.Cleanup(gh.Close)
+	t.Setenv("FORGE_SCOUT_TEST_TOKEN", "test-token")
+	dir := t.TempDir()
+	body := "connections:\n  - name: hub\n    url: " + gh.URL + "\n    token: ${FORGE_SCOUT_TEST_TOKEN}\n    owners: [acme]\n    private_addresses: true\n    allow_plaintext: true\n"
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	t.Setenv("CONFIG_PATH", path)
+	marker := filepath.Join(t.TempDir(), "forge-scout.healthy")
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	done := make(chan int, 1)
+	go func() { done <- runDaemon(ctx, new(slog.LevelVar), scopeDefault(), dir, marker) }()
+
+	deadline := time.Now().Add(30 * time.Second)
+	for rec.CountExact("scan complete") == 0 {
+		if time.Now().After(deadline) {
+			cancel()
+			<-done
+			t.Fatalf("no scan complete within 30s; messages %v", rec.Messages())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Errorf("marker after the first scan: %v, want it present", err)
+	}
+	cancel()
+	if code := <-done; code != 0 {
+		t.Errorf("runDaemon after its context ended = %d, want 0", code)
+	}
+	if _, err := os.Stat(marker); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("marker after shutdown: %v, want it removed", err)
+	}
+}
+
 // TestRunTrigger_exits_1_when_a_connection_was_not_listed runs a trigger scan
 // against a forge whose request budget is already at the read reserve, so the
 // connection is stopped before its repositories are listed.

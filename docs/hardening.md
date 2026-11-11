@@ -4,7 +4,7 @@ This page covers what forge-scout exposes, how it handles tokens, the hardened c
 
 ## What it exposes
 
-- forge-scout runs no HTTP server and listens on no port, so nothing on the network can reach it. Its output is standard output, and its health is a file marker.
+- forge-scout runs no HTTP server and listens on no port, so nothing on the network can reach it. Its output is standard output, and its health is a file the scan loop refreshes in `/dev/shm`.
 - It sends only read requests, and only to the forges in its config file. Every connection is opened with writes refused, and it reads at most 8 MiB of each response body. A larger response fails that read.
 - A connection refuses a private or loopback address unless it sets `private_addresses: true`, and an `http://` address unless it sets `allow_plaintext: true`.
 - Owner and repository names are checked before they go into a request URL, which rejects path traversal and injection characters.
@@ -23,11 +23,9 @@ Because forge-scout only reads, a read-only token is all it needs. [Configuratio
       - ALL
     security_opt:
       - no-new-privileges:true
-    tmpfs:
-      - "/tmp:size=1m,mode=1777,noexec,nosuid,nodev"
 ```
 
-With `read_only: true`, the health marker needs the tmpfs at `/tmp`, and the run state stays on the `./data` volume, which keeps it across restarts.
+With `read_only: true`, forge-scout writes to two places. The run state goes to the `./data` volume, which keeps it across restarts. The health file goes to `/dev/shm`, which stays writable under a read-only root, so no tmpfs is needed. The health check never depends on `./data`.
 
 ## What the image contains
 
@@ -46,7 +44,7 @@ The image is built on distroless static and runs as the `nonroot` user, uid 6553
 | cplieger/go/yamlenv | [yamlenv](https://github.com/cplieger/go/tree/main/yamlenv), the config file decode: `${NAME}` expansion, unknown keys refused, and decode errors that never quote an expanded secret |
 | go.yaml.in/yaml/v4 | [yaml](https://github.com/yaml/go-yaml), the YAML parser under yamlenv |
 | cplieger/go/filesafe | [filesafe](https://github.com/cplieger/go/tree/main/filesafe), the crash-safe run state file |
-| cplieger/go/health | [health](https://github.com/cplieger/go/tree/main/health), the file-marker probe |
+| cplieger/go/health/v2 | [health](https://github.com/cplieger/go/tree/main/health), the health file and its probe |
 | cplieger/go/scheduler | [scheduler](https://github.com/cplieger/go/tree/main/scheduler), the scan loop |
 | cplieger/go/slogx | [slogx](https://github.com/cplieger/go/tree/main/slogx), the log setup |
 | cplieger/go/textsafe | [textsafe](https://github.com/cplieger/go/tree/main/textsafe), the sanitizer for text read from the forges |

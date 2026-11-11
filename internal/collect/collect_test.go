@@ -2133,7 +2133,7 @@ func TestScan_pervasive_401_is_token_invalid_and_a_sparse_one_is_not(t *testing.
 	ep := githubEndpoint("gh")
 	ep.openErr = &forge.OpenError{Product: forge.ProductGitLab, Err: fmt.Errorf("identify account: %w", forge.ErrTokenInvalid)}
 	h := newHarness(t, ep)
-	if got := h.scan(t); got != Incomplete {
+	if got := h.scan(t); got != incomplete {
 		t.Errorf("Scan with a connection that did not open = %s, want incomplete", got)
 	}
 	if l := lineFor(t, h.rec, "scan degraded", "gh"); l["cause"] != "token_invalid" || l["forge"] != "gitlab" {
@@ -2181,7 +2181,7 @@ func TestScan_a_discovery_401_right_after_a_fresh_open_is_connection_failed(t *t
 	ep := githubEndpoint("gh")
 	ep.conn.errs = map[string]error{"discover o": fmt.Errorf("list repositories: %w", forge.ErrTokenInvalid)}
 	h := newHarness(t, ep)
-	if got := h.scan(t); got != Incomplete {
+	if got := h.scan(t); got != incomplete {
 		t.Errorf("Scan with repository discovery rejected = %s, want incomplete", got)
 	}
 	if n := h.rec.CountExact("scan degraded"); n != 1 {
@@ -2332,7 +2332,7 @@ func TestScan_discovery_failure_is_connection_failed(t *testing.T) {
 	ep := githubEndpoint("gh")
 	ep.conn.errs = map[string]error{"discover o": errors.New("upstream 502")}
 	h := newHarness(t, ep)
-	if got := h.scan(t); got != Incomplete {
+	if got := h.scan(t); got != incomplete {
 		t.Errorf("Scan after a failed discovery = %s, want incomplete", got)
 	}
 	if l := lineFor(t, h.rec, "repo discovery failed", "gh"); l["level"] != "ERROR" || l["cause"] != "connection_failed" {

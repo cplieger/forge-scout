@@ -4,7 +4,7 @@
 // structured JSON log lines.
 //
 // main is the composition root: config, the forge connections, the run state
-// store, the collector and the health marker. All logic lives in internal/*.
+// store, the collector and the health status. All logic lives in internal/*.
 package main
 
 import (
@@ -26,13 +26,15 @@ import (
 	"github.com/cplieger/forge-scout/internal/runstate"
 	"github.com/cplieger/forge-scout/internal/spend"
 	"github.com/cplieger/forgeapi/v2/github"
-	"github.com/cplieger/go/health"
+	"github.com/cplieger/go/health/v2"
 	"github.com/cplieger/go/scheduler"
 	"github.com/cplieger/go/slogx"
 )
 
 // stateDir is the volume the run state lives on.
 const stateDir = "/data"
+
+var markerPath = health.MarkerPath("forge-scout")
 
 func main() {
 	// The JSON handler is installed before anything logs, so config warnings
@@ -43,7 +45,7 @@ func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "health":
-			health.RunProbe(health.DefaultPath, health.WithMaxAge(healthLease(config.ScanIntervalFromFile(config.Path())).Duration()))
+			health.RunProbe(markerPath, health.WithMaxAge(healthLease(config.ScanIntervalFromFile(config.Path())).Duration()))
 		case "trigger":
 			os.Exit(runTrigger(logLevel, base, stateDir))
 		default:
@@ -52,7 +54,10 @@ func main() {
 		}
 		os.Exit(0)
 	}
-	os.Exit(runDaemon(logLevel, base, stateDir))
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	code := runDaemon(ctx, logLevel, base, stateDir, markerPath)
+	stop()
+	os.Exit(code)
 }
 
 // healthLease is how stale the marker may grow: three intervals, plus one
@@ -72,7 +77,7 @@ func scopeDefault() (base *slog.Logger) {
 // Every function below takes base, the logger with neither forge nor
 // connection, and scopes each line it logs with collect.Scope.
 
-func runDaemon(logLevel *slog.LevelVar, base *slog.Logger, dir string) int {
+func runDaemon(ctx context.Context, logLevel *slog.LevelVar, base *slog.Logger, dir, marker string) int {
 	cfg, ok := loadConfig(logLevel, base, config.Path())
 	if !ok {
 		return 1
@@ -83,22 +88,22 @@ func runDaemon(logLevel *slog.LevelVar, base *slog.Logger, dir string) int {
 	}
 	defer store.Close()
 	log := collect.Scope(base, forge.ProductUnknown, "")
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 
-	// The marker is loop liveness only: a bad token or a blind signal is
+	// The verdict is loop liveness only: a bad token or a blind signal is
 	// reported on the log channel, since a restart fixes neither.
-	marker := health.NewMarker(health.DefaultPath)
-	marker.Set(false)
-	defer marker.Cleanup()
+	st := health.NewStatus(health.WithMarker(marker))
+	// AfterFunc's goroutine may still be pending when the loop returns, so the
+	// defer is what removes the file before the process exits.
+	context.AfterFunc(ctx, st.BeginDrain)
+	defer st.BeginDrain()
 
 	collector := newCollector(ctx, &cfg, base, store)
 	defer collector.Close()
-	marker.Set(true)
+	st.Set(true)
 	log.Info("scheduled mode", "interval", cfg.ScanInterval.String(), "jitter", fmt.Sprintf("±%d%%", config.ScanJitterPercent))
 	scheduler.RunLoop(ctx, func(ctx context.Context) {
 		collector.Scan(ctx)
-		marker.Set(true)
+		st.Set(true)
 	}, scheduler.LoopOptions{Interval: cfg.ScanInterval, FireOnStart: true, Jitter: config.ScanJitter})
 	log.Info("shutdown complete", "cause", context.Cause(ctx))
 	return 0
