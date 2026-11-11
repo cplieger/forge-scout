@@ -3,15 +3,15 @@ module github.com/cplieger/forge-scout
 go 1.27.4
 
 require (
-	github.com/cplieger/forgeapi/v2 v2.0.0-dev.20
+	github.com/cplieger/forgeapi/v2 v2.0.0-dev.21
 	github.com/cplieger/go/filesafe v1.1.0
 	github.com/cplieger/go/health v1.1.0
-	github.com/cplieger/go/httpcache v1.1.0-dev.6
+	github.com/cplieger/go/httpcache v1.1.0
 	github.com/cplieger/go/httpclient v1.2.0
 	github.com/cplieger/go/jsonx v1.1.0
 	github.com/cplieger/go/scheduler v1.1.0
 	github.com/cplieger/go/slogx v1.1.0
-	github.com/cplieger/go/ssrf v1.1.0-dev.7
+	github.com/cplieger/go/ssrf v1.1.0
 	github.com/cplieger/go/textsafe v1.1.0
 	github.com/cplieger/go/yamlenv v1.1.0
 	go.yaml.in/yaml/v4 v4.0.0
