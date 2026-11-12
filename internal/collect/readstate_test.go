@@ -522,7 +522,7 @@ func TestScan_a_limit_reached_after_the_last_read_is_still_a_stop(t *testing.T) 
 		return forge.ErrRunsUndated
 	}
 	h := newLimitedHarness(t, 100*time.Millisecond, ep)
-	if got := h.scan(t); got != Incomplete {
+	if got := h.scan(t); got != incomplete {
 		t.Errorf("Scan past its limit after its last read = %s, want incomplete; messages %v", got, h.rec.Messages())
 	}
 	if s := lineFor(t, h.rec, "scan stopped", "gt"); s["reason"] != "scan_timeout" {

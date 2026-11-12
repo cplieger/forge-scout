@@ -10,7 +10,7 @@ import (
 	"github.com/cplieger/forge-scout/internal/config"
 	"github.com/cplieger/forge-scout/internal/forge"
 	"github.com/cplieger/forge-scout/internal/forgeconn/forgeconntest"
-	"github.com/cplieger/slogx/capture"
+	"github.com/cplieger/go/slogx/capture"
 )
 
 // identityWorld's runs are given oldest first.

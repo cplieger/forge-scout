@@ -19,7 +19,7 @@ import (
 	"github.com/cplieger/forge-scout/internal/forge"
 	"github.com/cplieger/forge-scout/internal/runstate"
 	"github.com/cplieger/forge-scout/internal/spend"
-	"github.com/cplieger/slogx/capture"
+	"github.com/cplieger/go/slogx/capture"
 )
 
 // blockUntilDone holds the read named call until its context ends; fallback
@@ -55,7 +55,7 @@ func TestScan_a_connection_past_its_limit_stops_and_the_others_publish(t *testin
 	fast.conn.prs = map[string][]forge.PullRequest{"o": {{Repo: "o/r", Number: 2, Author: "x"}}}
 	// A 2s limit leaves a 200ms save reserve, far above a write under load.
 	h := newLimitedHarness(t, 2*time.Second, slow, fast)
-	if got := h.scan(t); got != Incomplete {
+	if got := h.scan(t); got != incomplete {
 		t.Errorf("Scan with a connection past its limit = %s, want incomplete: that connection published nothing", got)
 	}
 	s := lineFor(t, h.rec, "scan stopped", "slow")
@@ -140,7 +140,7 @@ func TestScan_a_save_past_the_limit_stops_its_connection_and_the_others_publish(
 	go func() { done <- h.c.Scan(t.Context()) }()
 	select {
 	case got := <-done:
-		if got != Incomplete {
+		if got != incomplete {
 			t.Errorf("Scan with a save past the limit = %s, want incomplete", got)
 		}
 	case <-time.After(2 * time.Second):
@@ -375,7 +375,7 @@ func burstLines(rec *capture.Recorder, cut int) (burst, after []string) {
 
 func TestScan_a_shutdown_at_any_burst_line_logs_no_line_after_it(t *testing.T) {
 	h := fullBurstHarness(t)
-	if got := h.scan(t); got != Incomplete {
+	if got := h.scan(t); got != incomplete {
 		t.Fatalf("Setup: uncut scan = %s, want incomplete: st stops", got)
 	}
 	want, _ := burstLines(h.rec, -1)

@@ -11,7 +11,7 @@ import (
 	"github.com/cplieger/forge-scout/internal/forge"
 	"github.com/cplieger/forge-scout/internal/ghquota"
 	"github.com/cplieger/forge-scout/internal/spend"
-	"github.com/cplieger/forgeapi"
+	"github.com/cplieger/forgeapi/v2"
 )
 
 // fakeAPI answers the reads the adapter makes from function fields; an
@@ -466,6 +466,33 @@ func TestOpenPRs_maps_rows(t *testing.T) {
 	}
 	if ref, ok := pr.RepoHandle().(forgeapi.RepoRef); !ok || ref.DisplayPath != "group/sub/r" {
 		t.Errorf("OpenPRs row repo handle = %v, want the row's own repository address", pr.RepoHandle())
+	}
+}
+
+func TestOpenPRs_and_RepoOpenPRs_leave_merge_state_unread(t *testing.T) {
+	var mine, listed forgeapi.ListSettings
+	f := &fakeAPI{
+		myPRs: func(opts ...forgeapi.ListOption) (forgeapi.Page[forgeapi.PullRequest], error) {
+			mine = settings(t, opts)
+			return prPage(7, nil), nil
+		},
+		listPRs: func(opts ...forgeapi.ListOption) (forgeapi.Page[forgeapi.PullRequest], error) {
+			listed = settings(t, opts)
+			return prPage(7, nil), nil
+		},
+	}
+	c := client(t, f)
+	if _, err := c.OpenPRs(t.Context(), "o"); err != nil {
+		t.Fatalf("OpenPRs = %v", err)
+	}
+	if _, err := c.RepoOpenPRs(t.Context(), ghRepo); err != nil {
+		t.Fatalf("RepoOpenPRs = %v", err)
+	}
+	if !mine.MergeStateSet || mine.MergeState {
+		t.Errorf("OpenPRs sent merge state %t (set %t), want false, set", mine.MergeState, mine.MergeStateSet)
+	}
+	if !listed.MergeStateSet || listed.MergeState {
+		t.Errorf("RepoOpenPRs sent merge state %t (set %t), want false, set", listed.MergeState, listed.MergeStateSet)
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -12,8 +13,8 @@ import (
 	"time"
 
 	"github.com/cplieger/forge-scout/internal/runstate"
-	"github.com/cplieger/scheduler/v4"
-	"github.com/cplieger/slogx/capture"
+	"github.com/cplieger/go/scheduler"
+	"github.com/cplieger/go/slogx/capture"
 )
 
 // writeConfig writes body as a config file in a fresh directory and returns its path.
@@ -177,6 +178,8 @@ func TestLoad_refuses_invalid_files(t *testing.T) {
 		{"out_of_range_api_port", "connections:\n  - name: a\n    url: https://example.test\n    api_url: https://example.test:65536/api\n    token: x\n    owners: [o]\n", "api_url"},
 		{"missing_token", "connections:\n  - name: a\n    url: https://github.com\n    owners: [o]\n", "token"},
 		{"unset_token_reference", "connections:\n  - name: a\n    url: https://github.com\n    token: ${UNSET_TOKEN}\n    owners: [o]\n", "token references UNSET_TOKEN, which is not set"},
+		{"tagged_token_reference", "connections:\n  - name: a\n    url: https://github.com\n    token: !secret ${GITHUB_TOKEN}\n    owners: [o]\n", "token references GITHUB_TOKEN but was not expanded: write it as a plain or quoted ${NAME}, without a YAML tag"},
+		{"tagged_unset_token_reference", "connections:\n  - name: a\n    url: https://github.com\n    token: !secret ${UNSET_TOKEN}\n    owners: [o]\n", "token references UNSET_TOKEN but was not expanded"},
 		{"disallowed_reference", "connections:\n  - name: a\n    url: https://github.com\n    token: ${HOME_PATH}\n    owners: [o]\n", "token references HOME_PATH, which is not an allowed name"},
 		{"malformed_token_reference", "connections:\n  - name: a\n    url: https://github.com\n    token: ${1BAD}\n    owners: [o]\n", "token must be one ${NAME} reference"},
 		{"no_owners", "connections:\n  - name: a\n    url: https://github.com\n    token: x\n", "owner"},
@@ -646,6 +649,246 @@ func TestLoad_refuses_a_token_variable_outside_token(t *testing.T) {
 		_, _, err := load(writeConfig(t, body), env(map[string]string{"GITHUB_TOKEN": "secret-token-value"}))
 		if err == nil || strings.Contains(err.Error(), "secret-token-value") || !strings.Contains(err.Error(), "outside token") {
 			t.Errorf("Load(%q) = %v, want a refusal that does not carry the value", body, err)
+		}
+	}
+}
+
+// mergedConnections is a file whose second connection merges the first
+// through a YAML merge key and adds fields.
+func mergedConnections(fields string) string {
+	return "connections:\n  - &c\n    name: a\n    url: https://github.com\n    token: ${GITHUB_TOKEN}\n    owners: [o1, o2]\n  - <<: *c\n" + fields
+}
+
+func TestLoad_a_connection_merges_another_through_a_merge_key(t *testing.T) {
+	t.Parallel()
+	lookup := env(map[string]string{"GITHUB_TOKEN": "test-token", "OTHER_TOKEN": "other-token"})
+	tests := []struct{ name, fields, url, token string }{
+		{"overrides_the_token", "    name: b\n    url: https://git.example.lan\n    token: ${OTHER_TOKEN}\n", "https://git.example.lan", "other-token"},
+		{"inherits_the_token", "    name: b\n    url: https://gitlab.com\n", "https://gitlab.com", "test-token"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			cfg, _, err := load(writeConfig(t, mergedConnections(tc.fields)), lookup)
+			if err != nil {
+				t.Fatalf("Load(%s) = %v, want it loaded: a merged token is the connection's token", tc.name, err)
+			}
+			b := cfg.Connections[1]
+			if b.Name != "b" || b.URL != tc.url || b.Token != tc.token || !slices.Equal(b.Owners, []string{"o1", "o2"}) {
+				t.Errorf("Load(%s) connection 2 = name %q url %q token-set %t owners %v, want b %s, the expected token, the merged owners [o1 o2]",
+					tc.name, b.Name, b.URL, b.Token == tc.token, b.Owners, tc.url)
+			}
+		})
+	}
+}
+
+func TestLoad_a_name_merged_twice_is_shown_as_its_reference(t *testing.T) {
+	t.Parallel()
+	body := "connections:\n  - &c\n    name: ${FORGE_SCOUT_NAME}\n    url: https://github.com\n    token: ${GITHUB_TOKEN}\n    owners: [o]\n  - <<: *c\n    url: https://gitlab.com\n"
+	_, _, err := load(writeConfig(t, body), env(map[string]string{"GITHUB_TOKEN": "test-token", "FORGE_SCOUT_NAME": "hidden-name"}))
+	if err == nil || !strings.Contains(err.Error(), `connection "${FORGE_SCOUT_NAME}" is named twice`) || strings.Contains(err.Error(), "hidden-name") {
+		t.Errorf("Load = %v, want the merged name refused as named twice and shown as its reference, never its value", err)
+	}
+}
+
+func TestLoad_refuses_a_token_variable_merged_outside_token(t *testing.T) {
+	t.Parallel()
+	tests := []struct{ name, body, where string }{
+		{"bot_author", "connections:\n  - <<: {bot_authors: [\"${X_TOKEN}\"]}\n    name: a\n    url: https://github.com\n    token: ${GITHUB_TOKEN}\n    owners: [o]\n", "connections[1].bot_authors[1]"},
+		{"url_a_token_reads", "connections:\n  - <<: {url: \"${FORGE_SCOUT_SECRET}\"}\n    name: a\n    token: ${FORGE_SCOUT_SECRET}\n    owners: [o]\n", "connections[1].url"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			_, _, err := load(writeConfig(t, tc.body), env(map[string]string{"GITHUB_TOKEN": "test-token", "X_TOKEN": "x-token-value", "FORGE_SCOUT_SECRET": "https://opaque-credential.example"}))
+			if err == nil || !strings.Contains(err.Error(), tc.where+": a token variable is referenced outside token") || strings.Contains(err.Error(), "x-token-value") || strings.Contains(err.Error(), "opaque-credential") {
+				t.Errorf("Load(%s) = %v, want a refusal naming %s, the path the decode merges the value to, and no value", tc.name, err, tc.where)
+			}
+		})
+	}
+}
+
+// TestLoad_refuses_a_merge_tag_on_a_key_whose_value_is_no_mapping pins go-yaml
+// v4's rule that a !!merge tag makes any key a merge key: with a scalar or a
+// list of scalars as its value the decode refuses the file, and the refusal
+// carries no value.
+func TestLoad_refuses_a_merge_tag_on_a_key_whose_value_is_no_mapping(t *testing.T) {
+	t.Parallel()
+	tests := []struct{ name, body string }{
+		{"url", "connections:\n  - name: a\n    !!merge url: \"${X_TOKEN}\"\n    token: ${GITHUB_TOKEN}\n    owners: [o]\n"},
+		{"owners", "connections:\n  - name: a\n    url: https://github.com\n    token: ${GITHUB_TOKEN}\n    !!merge owners: [\"${X_TOKEN}\"]\n"},
+		{"name", "connections:\n  - url: https://github.com\n    !!merge name: ${X_TOKEN}\n    token: ${GITHUB_TOKEN}\n    owners: [o]\n"},
+		{"token", "connections:\n  - name: a\n    url: https://github.com\n    !!merge token: ${GITHUB_TOKEN}\n    owners: [o]\n"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			_, _, err := load(writeConfig(t, tc.body), env(map[string]string{"GITHUB_TOKEN": "test-token", "X_TOKEN": "x-token-value"}))
+			if err == nil || strings.Contains(err.Error(), "x-token-value") || strings.Contains(err.Error(), "test-token") {
+				t.Errorf("Load(%s) = %v, want the merge of a non-mapping refused with no value", tc.name, err)
+			}
+		})
+	}
+}
+
+// TestLoad_follows_a_merge_tag_on_any_key pins the walk to go-yaml v4's merge
+// keys: a !!merge-tagged key of any name merges its mapping, so a value it
+// brings in is judged at the path the decode puts it.
+func TestLoad_follows_a_merge_tag_on_any_key(t *testing.T) {
+	t.Parallel()
+	refused := "connections:\n  - name: a\n    url: https://github.com\n    token: ${GITHUB_TOKEN}\n    owners: [o]\n    !!merge extra: {bot_authors: [\"${X_TOKEN}\"]}\n"
+	lookup := env(map[string]string{"GITHUB_TOKEN": "test-token", "X_TOKEN": "x-token-value"})
+	_, _, err := load(writeConfig(t, refused), lookup)
+	if err == nil || !strings.Contains(err.Error(), "connections[1].bot_authors[1]: a token variable is referenced outside token") || strings.Contains(err.Error(), "x-token-value") {
+		t.Errorf("Load = %v, want a refusal naming connections[1].bot_authors[1], where the decode merges the value, and no value", err)
+	}
+	merged := "connections:\n  - name: a\n    url: https://github.com\n    !!merge creds: {token: \"${GITHUB_TOKEN}\"}\n    owners: [o]\n"
+	cfg, _, err := load(writeConfig(t, merged), lookup)
+	if err != nil {
+		t.Fatalf("Load = %v, want it loaded: the merged token is the connection's token", err)
+	}
+	if got := cfg.Connections[0].Token; got != "test-token" {
+		t.Errorf("Load token = %q, want the merged test-token", got)
+	}
+}
+
+// TestLoad_judges_only_the_last_merge_key_of_a_mapping pins go-yaml v4's rule
+// that of several merge keys in one mapping only the last merges: the token
+// comes from it, so its variable is a token variable and the url naming it
+// is refused, while the earlier merge key's token is never read.
+func TestLoad_judges_only_the_last_merge_key_of_a_mapping(t *testing.T) {
+	t.Parallel()
+	body := "connections:\n  - <<: {token: \"${GITHUB_TOKEN}\"}\n    !!merge last: {token: \"${FORGE_SCOUT_SECRET}\"}\n    name: a\n    url: \"${FORGE_SCOUT_SECRET}\"\n    owners: [o]\n"
+	_, _, err := load(writeConfig(t, body), env(map[string]string{"GITHUB_TOKEN": "test-token", "FORGE_SCOUT_SECRET": "https://opaque-credential.example"}))
+	if err == nil || !strings.Contains(err.Error(), "connections[1].url: a token variable is referenced outside token") || strings.Contains(err.Error(), "opaque-credential") {
+		t.Errorf("Load = %v, want the url refused for naming the last merge key's token variable, and no value", err)
+	}
+}
+
+// TestLoad_names_a_key_as_the_decode_does pins the walk to the field name the
+// decode reads from a key, through an alias or a !!binary tag, and to the null
+// key it skips: otherwise a token written under such a key is judged as some
+// other value, and a token variable it names can reach a logged url.
+func TestLoad_names_a_key_as_the_decode_does(t *testing.T) {
+	t.Parallel()
+	lookup := env(map[string]string{"GITHUB_TOKEN": "test-token", "FORGE_SCOUT_SECRET": "opaque-credential", "X_TOKEN": "x-token-value"})
+	refused := []struct{ name, body string }{
+		{"alias_key", "connections:\n  - <<: {token: \"${GITHUB_TOKEN}\"}\n    name: a\n    owners: [&t token]\n    *t : \"${FORGE_SCOUT_SECRET}\"\n    url: \"https://forge.example/${FORGE_SCOUT_SECRET}\"\n"},
+		{"binary_key", "connections:\n  - <<: {token: \"${GITHUB_TOKEN}\"}\n    name: a\n    owners: [o]\n    !!binary dG9rZW4= : \"${FORGE_SCOUT_SECRET}\"\n    url: \"https://forge.example/${FORGE_SCOUT_SECRET}\"\n"},
+	}
+	for _, tc := range refused {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			_, _, err := load(writeConfig(t, tc.body), lookup)
+			if err == nil || !strings.Contains(err.Error(), "connections[1].url: a token variable is referenced outside token") || strings.Contains(err.Error(), "opaque-credential") {
+				t.Errorf("Load(%s) = %v, want the url refused for naming the token's variable, and no value", tc.name, err)
+			}
+		})
+	}
+	loaded := []struct{ name, body string }{
+		{"merged_binary_token", "connections:\n  - <<: {!!binary dG9rZW4= : \"${GITHUB_TOKEN}\"}\n    name: a\n    url: https://github.com\n    owners: [o]\n"},
+		{"merged_alias_token", "connections:\n  - name: a\n    url: https://github.com\n    owners: [&t token]\n    <<: {*t : \"${GITHUB_TOKEN}\"}\n"},
+		{"merged_null_key", "connections:\n  - name: a\n    <<: {~: \"${X_TOKEN}\", url: https://github.com}\n    token: ${GITHUB_TOKEN}\n    owners: [o]\n"},
+		{"null_key_holding_a_cycle", "connections:\n  - name: a\n    url: https://github.com\n    token: ${GITHUB_TOKEN}\n    owners: [o]\n    ~: &a [*a]\n"},
+	}
+	for _, tc := range loaded {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			cfg, _, err := load(writeConfig(t, tc.body), lookup)
+			if err != nil {
+				t.Fatalf("Load(%s) = %v, want it loaded", tc.name, err)
+			}
+			if got := cfg.Connections[0].Token; got != "test-token" {
+				t.Errorf("Load(%s) token = %q, want test-token", tc.name, got)
+			}
+		})
+	}
+}
+
+// TestDecode_refuses_a_quoted_merge_key_in_a_merged_mapping pins that go-yaml
+// v4 merges a quoted "<<" in as an ordinary key, which the strict decode
+// refuses as unknown, so nothing reads its value.
+func TestDecode_refuses_a_quoted_merge_key_in_a_merged_mapping(t *testing.T) {
+	t.Parallel()
+	body := "connections:\n  - <<: {\"<<\": \"${X_TOKEN}\", url: https://github.com}\n    name: a\n    token: ${GITHUB_TOKEN}\n    owners: [o]\n"
+	lookup := env(map[string]string{"GITHUB_TOKEN": "test-token", "X_TOKEN": "x-token-value"})
+	_, _, _, err := decode(writeConfig(t, body), lookup)
+	if err == nil || !strings.Contains(err.Error(), `unknown configuration key "<<"`) || strings.Contains(err.Error(), "x-token-value") {
+		t.Errorf("decode = %v, want the quoted \"<<\" refused as an unknown key, with no value", err)
+	}
+}
+
+func TestLoad_an_own_key_replaces_a_merged_value_whole(t *testing.T) {
+	t.Parallel()
+	body := "connections:\n  - &c\n    name: a\n    url: https://github.com\n    token: ${GITHUB_TOKEN}\n    owners: [o1, o2]\n    exclude: [{author: a, label: l}]\n" +
+		"  - <<: *c\n    name: b\n    url: https://gitlab.com\n    owners: [o3]\n    exclude:\n      - {author: x}\n"
+	cfg, _, err := load(writeConfig(t, body), tokenEnv)
+	if err != nil {
+		t.Fatalf("Load = %v, want it loaded: b's own exclude list replaces a's, label included", err)
+	}
+	b := cfg.Connections[1]
+	if len(b.Exclude) != 1 || b.Exclude[0].Author != "x" || b.Exclude[0].Label != "" || !slices.Equal(b.Owners, []string{"o3"}) {
+		t.Errorf("connection 2 = exclude %+v owners %v, want only its own rule {author: x} and its own owners [o3]", b.Exclude, b.Owners)
+	}
+}
+
+// TestDecode_source_holds_the_values_the_decode_keeps_through_merge_keys pins
+// the walk to go-yaml's merge precedence (see mappingScalars): through an
+// own key, a nested merge and a sequence merge, source agrees with the decoded
+// values and holds nothing at a path the decode did not fill.
+func TestDecode_source_holds_the_values_the_decode_keeps_through_merge_keys(t *testing.T) {
+	t.Parallel()
+	body := `
+connections:
+  - &base
+    name: base
+    url: https://base.example
+    api_url: https://base.example/api
+    token: ${BASE_TOKEN}
+    owners: [base]
+  - &x
+    <<: *base
+    name: x
+    url: https://x.example
+  - &y
+    name: y
+    url: https://y.example
+    api_url: https://y.example/api
+    token: ${Y_TOKEN}
+    owners: [y1, y2]
+  - <<: [*x, *y]
+    name: z
+`
+	fc, src, _, err := decode(writeConfig(t, body), env(map[string]string{"BASE_TOKEN": "base-token", "Y_TOKEN": "y-token"}))
+	if err != nil {
+		t.Fatalf("decode = %v, want nil", err)
+	}
+	for path, want := range map[string]string{
+		"connections[4].name":      "z",
+		"connections[4].url":       "https://x.example",
+		"connections[4].api_url":   "https://base.example/api",
+		"connections[4].token":     "${BASE_TOKEN}",
+		"connections[4].owners[1]": "base",
+	} {
+		if got, ok := src[path]; !ok || got != want {
+			t.Errorf("source[%s] = %q, %t, want %q", path, got, ok, want)
+		}
+	}
+	for path := range src {
+		if strings.Contains(path, "<<") {
+			t.Errorf("source has the path %s, which no decoded value has", path)
+		}
+	}
+	for i, c := range fc.Connections {
+		at := connectionPath(i)
+		if src[at+".name"] != c.Name || src[at+".url"] != c.URL || src[at+".api_url"] != c.APIURL {
+			t.Errorf("source %s = name %q url %q api_url %q, want the decoded %q %q %q", at, src[at+".name"], src[at+".url"], src[at+".api_url"], c.Name, c.URL, c.APIURL)
+		}
+		for j := range len(c.Owners) + 1 {
+			got, ok := src[at+".owners["+strconv.Itoa(j+1)+"]"]
+			if j < len(c.Owners) && got != c.Owners[j] || j == len(c.Owners) && ok {
+				t.Errorf("source %s.owners[%d] = %q, %t, want the decoded owners %v and nothing past them", at, j+1, got, ok, c.Owners)
+			}
 		}
 	}
 }

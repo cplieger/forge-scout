@@ -29,8 +29,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/cplieger/atomicfile/v4"
 	"github.com/cplieger/forge-scout/internal/forge"
+	"github.com/cplieger/go/filesafe"
 )
 
 const fileName = "state.json"
@@ -72,10 +72,10 @@ var errUndelivered = errors.New("run changes not delivered; read not recorded")
 
 // writeState writes the state file; a var so a test can stand in for the
 // filesystem's answer.
-var writeState = atomicfile.WriteFile
+var writeState = filesafe.WriteFile
 
 // readState reads the state file; a var so a test can watch the read.
-var readState = atomicfile.ReadBoundedInRoot
+var readState = filesafe.ReadBoundedInRoot
 
 // Store is the run state of one directory, held by this process. Its methods
 // are safe for concurrent use.
@@ -302,7 +302,7 @@ func (s *Store) adopt(next *state) ([]byte, error) {
 // write replaces the file with data. ErrNotDurable reports a write in place
 // that a power loss could still undo.
 func (s *Store) write(ctx context.Context, data []byte) error {
-	res, err := writeState(ctx, s.Path(), data, atomicfile.WithMode(0o600), atomicfile.WithMaxBytes(maxStateBytes))
+	res, err := writeState(ctx, s.Path(), data, filesafe.WithMode(0o600), filesafe.WithMaxBytes(maxStateBytes))
 	if err != nil {
 		return err
 	}
@@ -318,7 +318,7 @@ const staleTempAge = time.Hour
 // CleanupTemps removes temp files a write interrupted by a crash left in the
 // store directory, reporting how many could not be removed or inspected.
 func (s *Store) CleanupTemps(ctx context.Context) (failed int, err error) {
-	res, err := atomicfile.CleanupStaleTemps(ctx, s.dir, staleTempAge)
+	res, err := filesafe.CleanupStaleTemps(ctx, s.dir, staleTempAge)
 	return res.Failed + res.Unreadable, err
 }
 

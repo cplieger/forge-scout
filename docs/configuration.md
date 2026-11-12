@@ -95,4 +95,4 @@ Two connections to one forge may not use tokens of the same account, because bot
 
 The trigger uses the run state in `/data`, so a run is still logged once across one-shot scans. It is for a standalone run, not for use beside the daemon: one process holds `/data` at a time, so a trigger started while the daemon runs logs `state directory is in use by another forge-scout process` and exits 1 without reading anything. A `/data` it cannot lock, such as one it cannot write, logs `run state directory unusable` and exits 1 the same way.
 
-In a container, leave scheduling to the built-in timer. A scan started with `docker exec forge-scout /forge-scout trigger` writes to the exec session and not to the container log, so the dashboard and the alert rules never see it. A one-shot scan never touches the health marker.
+In a container, leave scheduling to the built-in timer. A scan started with `docker exec forge-scout /forge-scout trigger` writes to the exec session and not to the container log, so the dashboard and the alert rules never see it. A one-shot scan never touches the health file.

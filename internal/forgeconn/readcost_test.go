@@ -14,7 +14,7 @@ import (
 	"github.com/cplieger/forge-scout/internal/forgeconn/forgeconntest"
 	"github.com/cplieger/forge-scout/internal/ghquota"
 	"github.com/cplieger/forge-scout/internal/spend"
-	"github.com/cplieger/forgeapi"
+	"github.com/cplieger/forgeapi/v2"
 )
 
 // openMetered opens a fake of product serving w with spent as the

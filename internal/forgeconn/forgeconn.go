@@ -19,8 +19,8 @@ import (
 	"github.com/cplieger/forge-scout/internal/forge"
 	"github.com/cplieger/forge-scout/internal/ghquota"
 	"github.com/cplieger/forge-scout/internal/spend"
-	"github.com/cplieger/forgeapi"
-	"github.com/cplieger/forgeapi/families"
+	"github.com/cplieger/forgeapi/v2"
+	"github.com/cplieger/forgeapi/v2/families"
 )
 
 // Walk ceilings, in pages: each list call reads one page. Reaching one with a
@@ -238,7 +238,10 @@ func (c *Client) Discover(ctx context.Context, owners []string) (forge.Discovery
 // otherwise forge.ErrSnapshotPartial: a cut snapshot is never answered.
 func (c *Client) OpenPRs(ctx context.Context, owner string) ([]forge.PullRequest, error) {
 	rows, err := snapshot(ctx, c, maxSnapshotPages, func(ctx context.Context, after forgeapi.Cursor) (forgeapi.Page[forgeapi.PullRequest], error) {
-		return c.api.ListMyPRs(ctx, forgeapi.WithOwner(owner), forgeapi.WithAfter(after))
+		// prsOf reads no merge state, and GitHub computing it per row brings a
+		// page near its 10 s query timeout
+		// (https://docs.github.com/en/graphql/overview/rate-limits-and-query-limits-for-the-graphql-api#timeouts).
+		return c.api.ListMyPRs(ctx, forgeapi.WithOwner(owner), forgeapi.WithMergeState(false), forgeapi.WithAfter(after))
 	})
 	if err != nil {
 		return nil, err
@@ -264,7 +267,7 @@ func (c *Client) RepoOpenPRs(ctx context.Context, repo forge.Repo) ([]forge.Pull
 		return nil, err
 	}
 	rows, err := snapshot(ctx, c, maxRepoItemPages, func(ctx context.Context, after forgeapi.Cursor) (forgeapi.Page[forgeapi.PullRequest], error) {
-		return c.api.ListPRs(ctx, ref, forgeapi.WithState(forgeapi.ListStateOpen), forgeapi.WithAfter(after))
+		return c.api.ListPRs(ctx, ref, forgeapi.WithState(forgeapi.ListStateOpen), forgeapi.WithMergeState(false), forgeapi.WithAfter(after))
 	})
 	if err != nil {
 		return nil, err

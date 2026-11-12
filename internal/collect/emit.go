@@ -10,7 +10,7 @@ import (
 
 	"github.com/cplieger/forge-scout/internal/forge"
 	"github.com/cplieger/forge-scout/internal/runstate"
-	"github.com/cplieger/runesafe/v3"
+	"github.com/cplieger/go/textsafe"
 )
 
 func stamp(t time.Time) string { return t.UTC().Format(time.RFC3339) }
@@ -26,7 +26,7 @@ const cutMark = "…"
 
 // bounded is s sanitized and cut at maxValueBytes, for a diagnostic line.
 func bounded(s string) string {
-	v, _ := runesafe.SanitizeCapped(s, maxValueBytes, cutMark)
+	v, _ := textsafe.SanitizeCapped(s, maxValueBytes, cutMark)
 	return v
 }
 
@@ -45,7 +45,7 @@ func (l *lineAttrs) add(attrs ...slog.Attr) { l.attrs = append(l.attrs, attrs...
 
 // text adds key's forge-controlled value s, sanitized and bounded.
 func (l *lineAttrs) text(key, s string) {
-	v, cut := runesafe.SanitizeCapped(s, maxValueBytes, cutMark)
+	v, cut := textsafe.SanitizeCapped(s, maxValueBytes, cutMark)
 	if cut {
 		l.cut = append(l.cut, key)
 	}
@@ -56,7 +56,7 @@ func (l *lineAttrs) text(key, s string) {
 // bound, is not an http or https URL with a host, or holds a rune the
 // sanitizer would replace: a cut or altered link opens another page.
 func (l *lineAttrs) link(s string) {
-	if s != "" && (len(s) > maxValueBytes || !webURL(s) || runesafe.SanitizeSingleLine(s) != s) {
+	if s != "" && (len(s) > maxValueBytes || !webURL(s) || textsafe.SanitizeSingleLine(s) != s) {
 		l.cut = append(l.cut, "url")
 		return
 	}
@@ -379,11 +379,12 @@ func (*Collector) emitDegraded(sc *scan, r *connResult) {
 }
 
 // emitStopped logs a stopped connection, with the read state of every
-// family. The first budget stop logged in a budget window is WARN and the
-// repeats until it renews INFO, the level of scan complete, so each stays
-// the stall alert's heartbeat. A budget stop with no window known, and a
-// stop at the limit, are always WARN. A stop is degraded when it escalates
-// or a read before it degraded; a clean budget stop works as intended.
+// family. The first budget stop in a budget window is news, so WARN; its
+// repeats until the window renews are expected, so INFO, like scan complete.
+// Every stop line also stays the stall alert's heartbeat. A budget stop with
+// no window known, and a stop at the limit, are always WARN. A stop is
+// degraded when it escalates or a read before it degraded; a clean budget
+// stop works as intended.
 func (c *Collector) emitStopped(sc *scan, r *connResult, escalated bool) {
 	stop := r.ledger.stop
 	level := slog.LevelWarn

@@ -1,19 +1,20 @@
 module github.com/cplieger/forge-scout
 
-go 1.27.3
+go 1.27.4
 
 require (
-	github.com/cplieger/atomicfile/v4 v4.2.0
-	github.com/cplieger/envx/yamlenv/v2 v2.3.0
-	github.com/cplieger/forgeapi v1.5.0
-	github.com/cplieger/health v1.10.0
-	github.com/cplieger/httpx/v5 v5.3.0
-	github.com/cplieger/jsoncap/v2 v2.1.0
-	github.com/cplieger/runesafe/v3 v3.2.0
-	github.com/cplieger/scheduler/v4 v4.3.0
-	github.com/cplieger/slogx v1.8.0
-	github.com/cplieger/ssrf/v4 v4.6.0
-	go.yaml.in/yaml/v3 v3.0.6
+	github.com/cplieger/forgeapi/v2 v2.0.0
+	github.com/cplieger/go/filesafe v1.1.0
+	github.com/cplieger/go/health/v2 v2.0.0
+	github.com/cplieger/go/httpcache v1.1.0
+	github.com/cplieger/go/httpclient v1.2.0
+	github.com/cplieger/go/jsonx v1.1.0
+	github.com/cplieger/go/scheduler v1.1.0
+	github.com/cplieger/go/slogx v1.1.0
+	github.com/cplieger/go/ssrf v1.1.0
+	github.com/cplieger/go/textsafe v1.1.0
+	github.com/cplieger/go/yamlenv v1.1.0
+	go.yaml.in/yaml/v4 v4.0.0
 )
 
-require github.com/cplieger/urlform v1.5.0 // indirect
+require github.com/cplieger/go/urlform v1.2.0 // indirect

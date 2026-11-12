@@ -169,12 +169,12 @@ func (c *Collector) Close() {
 // Outcome is what one scan established.
 type Outcome int
 
-// The Outcome members. The zero value is Incomplete, so an outcome nobody
+// The Outcome members. The zero value is incomplete, so an outcome nobody
 // set never reads as Complete.
 const (
-	// Incomplete is a scan in which some connection stopped, or did not read
+	// incomplete is a scan in which some connection stopped, or did not read
 	// every signal its forge has whole.
-	Incomplete Outcome = iota
+	incomplete Outcome = iota
 	// Interrupted is a scan whose context ended before it returned; it
 	// logged no line of its burst after that.
 	Interrupted
@@ -233,7 +233,7 @@ func (c *Collector) Scan(ctx context.Context) Outcome {
 	}
 	for _, r := range results {
 		if !r.ledger.complete() {
-			return Incomplete
+			return incomplete
 		}
 	}
 	return Complete

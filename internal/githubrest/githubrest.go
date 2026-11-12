@@ -1,8 +1,8 @@
 // Package githubrest reads the two GitHub REST routes forgeapi does not model:
 // a repository's open code-scanning alerts and its workflow definitions. Every
 // status is classified on its code, never on message text, through one table
-// of what each route's answers mean. Its reads go through forgeapi's read
-// cache, which revalidates a page it holds.
+// of what each route's answers mean. Its reads go through httpcache's
+// revalidation cache, which revalidates a page it holds.
 package githubrest
 
 import (
@@ -24,10 +24,10 @@ import (
 	"github.com/cplieger/forge-scout/internal/forge"
 	"github.com/cplieger/forge-scout/internal/ghquota"
 	"github.com/cplieger/forge-scout/internal/urlsafe"
-	"github.com/cplieger/forgeapi/readcache"
-	"github.com/cplieger/httpx/v5"
-	"github.com/cplieger/jsoncap/v2"
-	"github.com/cplieger/ssrf/v4"
+	"github.com/cplieger/go/httpcache"
+	"github.com/cplieger/go/httpclient"
+	"github.com/cplieger/go/jsonx"
+	"github.com/cplieger/go/ssrf"
 )
 
 const (
@@ -47,11 +47,11 @@ var errNotFound = errors.New("not found")
 type Client struct {
 	http    *http.Client
 	meter   *ghquota.Meter
-	cache   *readcache.Transport
+	cache   *httpcache.RoundTripper
 	base    string
 	token   string
 	version string
-	retry   []httpx.DoOption
+	retry   []httpclient.DoOption
 }
 
 // New returns a client for the API at base (see APIBase). version is sent as
@@ -61,12 +61,12 @@ type Client struct {
 // admitted by meter, the connection's quota, which sees its response. Its
 // transport sees each request as sent, a validator the read cache adds
 // included.
-func New(hc *http.Client, base, token, version string, meter *ghquota.Meter, logger *slog.Logger, retry ...httpx.Option) (*Client, error) {
-	opts := make([]httpx.DoOption, 0, len(retry)+2)
+func New(hc *http.Client, base, token, version string, meter *ghquota.Meter, logger *slog.Logger, retry ...httpclient.Option) *Client {
+	opts := make([]httpclient.DoOption, 0, len(retry)+2)
 	for _, o := range retry {
 		opts = append(opts, o)
 	}
-	opts = append(opts, httpx.WithLabel("github rest"), httpx.WithLogger(logger))
+	opts = append(opts, httpclient.WithLabel("github rest"), httpclient.WithLogger(logger))
 	inner := hc.Transport
 	if inner == nil {
 		inner = http.DefaultTransport
@@ -75,13 +75,10 @@ func New(hc *http.Client, base, token, version string, meter *ghquota.Meter, log
 	// (https://docs.github.com/en/rest/using-the-rest-api/best-practices-for-using-the-rest-api#use-conditional-requests-if-appropriate).
 	// A read pages by number and reads no header of a 200, so a served
 	// answer holds none.
-	cache, err := readcache.NewTransport(admitting{next: meter.Observe(inner), meter: meter}, readcache.WithFreeNotModified(true))
-	if err != nil {
-		return nil, fmt.Errorf("github rest read cache: %w", err)
-	}
+	cache := httpcache.NewRoundTripper(admitting{next: meter.Observe(inner), meter: meter}, httpcache.Config{FreeNotModified: true})
 	metered := *hc
 	metered.Transport = cache
-	return &Client{http: &metered, cache: cache, base: strings.TrimRight(base, "/"), token: token, version: version, retry: opts, meter: meter}, nil
+	return &Client{http: &metered, cache: cache, base: strings.TrimRight(base, "/"), token: token, version: version, retry: opts, meter: meter}
 }
 
 // ReadCache is what the client's read cache did since it was built.
@@ -133,7 +130,7 @@ func httpClient(base string, private, plaintext bool, opts ...ssrf.TransportOpti
 	}
 	return &http.Client{
 		Timeout:       30 * time.Second,
-		CheckRedirect: httpx.RedirectPolicyFunc(httpx.WithSameOrigin(true)),
+		CheckRedirect: httpclient.RedirectPolicy(httpclient.WithSameOrigin(true)),
 		Transport:     ssrf.SafeTransport(opts...),
 	}
 }
@@ -288,7 +285,7 @@ func (c *Client) CodeScanningAlerts(ctx context.Context, repo forge.Repo) (forge
 // a JSON array, null included, or that holds more rows than a page asks for,
 // is a decode failure, never an empty or a cut page.
 func decodeAlerts(repo string, body []byte) ([]forge.Alert, error) {
-	d := jsoncap.NewDecoder(bytes.NewReader(body), perPage)
+	d := jsonx.NewDecoder(bytes.NewReader(body), perPage)
 	rows, err := d.Array(nil, perPage, "alerts page", func(a *apiAlert) error { return d.Decode(a) })
 	if err == nil {
 		err = d.End()
@@ -335,7 +332,7 @@ func (c *Client) Workflows(ctx context.Context, repo forge.Repo) (forge.Listing[
 // (https://docs.github.com/en/rest/actions/workflows#list-repository-workflows),
 // is a decode failure.
 func decodeWorkflows(repo string, body []byte) ([]forge.Workflow, error) {
-	d := jsoncap.NewDecoder(bytes.NewReader(body), perPage)
+	d := jsonx.NewDecoder(bytes.NewReader(body), perPage)
 	var page []apiWorkflow
 	err := d.Object(func(key string) error {
 		if !strings.EqualFold(key, "workflows") {
@@ -377,10 +374,10 @@ func segments(path string) (owner, name string, err error) {
 	return owner, name, nil
 }
 
-// get reads one page's body under the client's retry policy, which repeats a
-// 5xx and the transport errors httpx.IsTransient accepts.
+// get reads one page's body under the client's retry policy, which repeats
+// the answers and transport errors httpclient.IsTransient accepts.
 func (c *Client) get(ctx context.Context, route string, q url.Values) ([]byte, error) {
-	return httpx.Do(ctx, func(ctx context.Context) ([]byte, error) {
+	return httpclient.Do(ctx, func(ctx context.Context) ([]byte, error) {
 		return c.attempt(ctx, c.base+route+"?"+q.Encode())
 	}, c.retry...)
 }
@@ -405,10 +402,10 @@ func (c *Client) attempt(ctx context.Context, reqURL string) ([]byte, error) {
 	}
 	defer resp.Body.Close()
 	if err := c.statusError(resp); err != nil {
-		httpx.Drain(resp.Body)
+		httpclient.Drain(resp.Body)
 		return nil, err
 	}
-	return httpx.ReadLimitedBody(resp.Body, bodyCap)
+	return httpclient.ReadLimitedBody(resp.Body, bodyCap)
 }
 
 // statusError is the package statusError, a rate limit carrying the budget
@@ -422,11 +419,12 @@ func (c *Client) statusError(resp *http.Response) error {
 }
 
 // statusError classifies a non-2xx answer on its status code and headers,
-// never its body. A 5xx is marked transient so the retry loop repeats it. A
-// 403 with X-RateLimit-Remaining at 0 or a Retry-After header is a rate
-// limit. Any other 403 is forge.ErrForbidden, which GitHub also answers for a
-// secondary limit that sets neither header, so the quota meter sends no more
-// requests after it (see ghquota.Meter.Admit).
+// never its body. A 403 with X-RateLimit-Remaining at 0 or a Retry-After
+// header is a rate limit. Any other 403 is forge.ErrForbidden, which GitHub
+// also answers for a secondary limit that sets neither header, so the quota
+// meter sends no more requests after it (see ghquota.Meter.Admit). Every other
+// answer is httpclient's *StatusError, which the retry loop repeats when
+// httpclient.IsRetryableStatus accepts its code.
 func statusError(resp *http.Response) error {
 	switch code := resp.StatusCode; {
 	case code >= 200 && code < 300:
@@ -440,10 +438,8 @@ func statusError(resp *http.Response) error {
 	case code == http.StatusNotFound:
 		return errNotFound
 	case code == http.StatusTooManyRequests:
-		return fmt.Errorf("%w: %w", forge.ErrRateLimited, httpx.CheckHTTPStatus(resp))
-	case code >= 500:
-		return httpx.MarkTransient(httpx.CheckHTTPStatus(resp))
+		return fmt.Errorf("%w: %w", forge.ErrRateLimited, httpclient.CheckStatus(resp))
 	default:
-		return httpx.CheckHTTPStatus(resp)
+		return httpclient.CheckStatus(resp)
 	}
 }

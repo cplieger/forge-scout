@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cplieger/atomicfile/v4"
 	"github.com/cplieger/forge-scout/internal/forge"
+	"github.com/cplieger/go/filesafe"
 )
 
 var t0 = time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
@@ -630,15 +630,15 @@ func TestCommit_records_nothing_of_a_read_whose_delivery_stopped_short(t *testin
 func stallWrites(t *testing.T) (release func()) {
 	t.Helper()
 	stalled := make(chan struct{})
-	writeState = func(ctx context.Context, path string, data []byte, opts ...atomicfile.Option) (atomicfile.Result, error) {
+	writeState = func(ctx context.Context, path string, data []byte, opts ...filesafe.WriteOption) (filesafe.Result, error) {
 		<-stalled
-		return atomicfile.WriteFile(context.WithoutCancel(ctx), path, data, opts...)
+		return filesafe.WriteFile(context.WithoutCancel(ctx), path, data, opts...)
 	}
 	var once sync.Once
 	release = func() { once.Do(func() { close(stalled) }) }
 	t.Cleanup(func() {
 		release()
-		writeState = atomicfile.WriteFile
+		writeState = filesafe.WriteFile
 	})
 	return release
 }
@@ -840,14 +840,14 @@ func TestCommit_a_failed_write_delivers_its_changes_once_and_a_later_write_store
 func TestCommit_a_change_whose_write_never_landed_is_delivered_again_after_a_restart(t *testing.T) {
 	s := open(t, t.TempDir())
 	commit(t, s, "gh", read(run(1, forge.RunFailing, t0)))
-	writeState = func(context.Context, string, []byte, ...atomicfile.Option) (atomicfile.Result, error) {
-		return atomicfile.Result{}, errors.New("disk full")
+	writeState = func(context.Context, string, []byte, ...filesafe.WriteOption) (filesafe.Result, error) {
+		return filesafe.Result{}, errors.New("disk full")
 	}
-	t.Cleanup(func() { writeState = atomicfile.WriteFile })
+	t.Cleanup(func() { writeState = filesafe.WriteFile })
 	if got, err := commitErr(t, s, "gh", read(run(2, forge.RunFailing, t0))); err == nil || len(got) != 1 || got[0].Run.ID != 2 {
 		t.Fatalf("Setup: Commit(write failing) = %+v, %v, want the error and run 2 delivered", got, err)
 	}
-	writeState = atomicfile.WriteFile
+	writeState = filesafe.WriteFile
 	next := reload(t, s)
 	if n := next.Delivered("gh"); n != 1 {
 		t.Fatalf("Delivered after the restart = %d, want the file's 1 run", n)
@@ -859,17 +859,17 @@ func TestCommit_a_change_whose_write_never_landed_is_delivered_again_after_a_res
 
 func TestCommit_a_write_that_is_not_durable_delivers_its_changes_and_a_restart_does_not_replay_them(t *testing.T) {
 	s := open(t, t.TempDir())
-	writeState = func(ctx context.Context, path string, data []byte, opts ...atomicfile.Option) (atomicfile.Result, error) {
-		res, err := atomicfile.WriteFile(ctx, path, data, opts...)
+	writeState = func(ctx context.Context, path string, data []byte, opts ...filesafe.WriteOption) (filesafe.Result, error) {
+		res, err := filesafe.WriteFile(ctx, path, data, opts...)
 		res.Durable = false
 		return res, err
 	}
-	t.Cleanup(func() { writeState = atomicfile.WriteFile })
+	t.Cleanup(func() { writeState = filesafe.WriteFile })
 	got, err := commitErr(t, s, "gh", read(run(1, forge.RunFailing, t0)))
 	if !errors.Is(err, ErrNotDurable) || len(got) != 1 || got[0].Run.ID != 1 || !got[0].New {
 		t.Fatalf("Commit(write not durable) = %+v, %v, want ErrNotDurable with run 1", got, err)
 	}
-	writeState = atomicfile.WriteFile
+	writeState = filesafe.WriteFile
 	if got := commit(t, s, "gh", read()); len(got) != 0 {
 		t.Errorf("next durable Commit = %+v, want no change: run 1 was delivered", got)
 	}
@@ -881,12 +881,12 @@ func TestCommit_a_write_that_is_not_durable_delivers_its_changes_and_a_restart_d
 
 func TestCommit_a_write_that_never_becomes_durable_delivers_each_change_once(t *testing.T) {
 	s := open(t, t.TempDir())
-	writeState = func(ctx context.Context, path string, data []byte, opts ...atomicfile.Option) (atomicfile.Result, error) {
-		res, err := atomicfile.WriteFile(ctx, path, data, opts...)
+	writeState = func(ctx context.Context, path string, data []byte, opts ...filesafe.WriteOption) (filesafe.Result, error) {
+		res, err := filesafe.WriteFile(ctx, path, data, opts...)
 		res.Durable = false
 		return res, err
 	}
-	t.Cleanup(func() { writeState = atomicfile.WriteFile })
+	t.Cleanup(func() { writeState = filesafe.WriteFile })
 	for i, id := range []int64{1, 2} {
 		got, err := commitErr(t, s, "gh", read(run(1, forge.RunFailing, t0), run(id, forge.RunFailing, t0)))
 		if !errors.Is(err, ErrNotDurable) || len(got) != 1 || got[0].Run.ID != id {
@@ -904,9 +904,9 @@ func TestLoad_reads_the_file_under_the_store_lock(t *testing.T) {
 			unlocked = true
 			s.mu.Unlock()
 		}
-		return atomicfile.ReadBoundedInRoot(ctx, root, name, maxBytes)
+		return filesafe.ReadBoundedInRoot(ctx, root, name, maxBytes)
 	}
-	t.Cleanup(func() { readState = atomicfile.ReadBoundedInRoot })
+	t.Cleanup(func() { readState = filesafe.ReadBoundedInRoot })
 	if d, err := s.Load(t.Context()); d != nil || err != nil {
 		t.Fatalf("Load = %+v, %v, want the file accepted", d, err)
 	}
@@ -1192,7 +1192,7 @@ func TestLoad_sets_aside_a_fifo_without_blocking(t *testing.T) {
 		<-done
 		t.Fatal("Load(FIFO) blocked, want the file set aside")
 	}
-	if got.err != nil || got.d == nil || !errors.Is(got.d.Reason, atomicfile.ErrNotRegular) || got.d.Aside == "" {
+	if got.err != nil || got.d == nil || !errors.Is(got.d.Reason, filesafe.ErrNotRegular) || got.d.Aside == "" {
 		t.Fatalf("Load(FIFO) = %+v, %v, want it set aside as not a regular file", got.d, got.err)
 	}
 	if fi, err := os.Lstat(got.d.Aside); err != nil || fi.Mode()&os.ModeNamedPipe == 0 {
@@ -1214,7 +1214,7 @@ func TestLoad_an_over_cap_file_is_set_aside_and_the_next_commit_succeeds(t *test
 	}
 	s := open(t, dir)
 	d, err := s.Load(t.Context())
-	if err != nil || d == nil || !errors.Is(d.Reason, atomicfile.ErrFileTooLarge) || d.Aside == "" {
+	if err != nil || d == nil || !errors.Is(d.Reason, filesafe.ErrFileTooLarge) || d.Aside == "" {
 		t.Fatalf("Load(over cap) = %+v, %v, want the file set aside as too large", d, err)
 	}
 	if got := commit(t, s, "gh", read(run(1, forge.RunFailing, t0))); len(got) != 1 {
@@ -1228,7 +1228,7 @@ func TestLoad_an_over_cap_file_is_set_aside_and_the_next_commit_succeeds(t *test
 func TestCleanupTemps_reclaims_an_abandoned_write(t *testing.T) {
 	dir := t.TempDir()
 	s := open(t, dir)
-	temp := filepath.Join(dir, atomicfile.TempName())
+	temp := filepath.Join(dir, filesafe.TempName())
 	if err := os.WriteFile(temp, []byte("x"), 0o600); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}

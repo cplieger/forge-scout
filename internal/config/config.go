@@ -26,12 +26,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cplieger/atomicfile/v4"
-	"github.com/cplieger/envx/yamlenv/v2"
 	"github.com/cplieger/forge-scout/internal/forge"
-	"github.com/cplieger/forgeapi"
-	"github.com/cplieger/slogx"
-	"go.yaml.in/yaml/v3"
+	"github.com/cplieger/forgeapi/v2"
+	"github.com/cplieger/go/filesafe"
+	"github.com/cplieger/go/slogx"
+	"github.com/cplieger/go/yamlenv"
+	"go.yaml.in/yaml/v4"
 )
 
 // defaultPath is the container-internal config file path.
@@ -101,7 +101,8 @@ type Warning struct {
 }
 
 // source is the document's scalar values as written, before expansion, by
-// key path, such as connections[1].owners[2].
+// key path, such as connections[1].owners[2]. A value a YAML merge key brings
+// in sits at the path the decode puts it (see mappingScalars).
 type source map[string]string
 
 type fileConfig struct {
@@ -161,7 +162,7 @@ func load(path string, lookup func(name string) (string, bool)) (Config, []Warni
 	}
 	cfg.LogLevel = lvl
 	top, errs := excludeRules("exclude", fc.Exclude, src)
-	conns, cerrs := connections(fc.Connections, top, src)
+	conns, cerrs := connections(fc.Connections, top, src, unresolved)
 	errs = append(errs, cerrs...)
 	if err := src.overlap(cfg.ScanInterval, cfg.Lookback); err != nil {
 		errs = append(errs, err)
@@ -347,16 +348,16 @@ func tokenRefOutsideToken(doc *yaml.Node) (where string, found bool) {
 
 // scalars calls visit with every scalar value under n, its path, and whether
 // it is a connection's token, until visit returns false; it reports whether
-// the walk ran to the end.
+// the walk ran to the end. It follows aliases and merge keys with no cycle
+// check, so it runs only on a document the decode accepted, which refuses an
+// anchor that contains itself.
 func scalars(n *yaml.Node, path string, tokenField bool, visit func(path, value string, token bool) bool) bool {
-	if n.Kind == yaml.AliasNode && n.Alias != nil {
-		n = n.Alias
-	}
+	n = deref(n)
 	switch n.Kind {
 	case yaml.ScalarNode:
 		return visit(path, n.Value, tokenField)
 	case yaml.MappingNode:
-		return mappingScalars(n, path, visit)
+		return mappingScalars(n, path, map[string]bool{}, visit)
 	}
 	for i, child := range n.Content {
 		childPath := path
@@ -370,17 +371,83 @@ func scalars(n *yaml.Node, path string, tokenField bool, visit func(path, value 
 	return true
 }
 
-// mappingScalars walks a mapping's values; only the token key of a
-// connections entry is a token.
-func mappingScalars(n *yaml.Node, path string, visit func(path, value string, token bool) bool) bool {
+// mappingScalars walks the values of a mapping's keys not yet in walked; only
+// the token key of a connections entry is a token. The mappings a merge key
+// names are walked after the mapping's own keys at the same path, in order
+// and depth first (each one's own keys, then its merges), sharing walked so
+// the first to write a key wins. That is go-yaml v4's default merge (its
+// effectiveMapping: conflicts "first", and of several merge keys in one
+// mapping only the last counts), so the walk visits exactly the values the
+// decode keeps, at the paths it puts them.
+func mappingScalars(n *yaml.Node, path string, walked map[string]bool, visit func(path, value string, token bool) bool) bool {
 	connection := strings.HasPrefix(path, "connections[") && !strings.Contains(path, ".")
+	var merge *yaml.Node
 	for i := 0; i+1 < len(n.Content); i += 2 {
-		key := n.Content[i].Value
-		if !scalars(n.Content[i+1], strings.TrimPrefix(path+"."+key, "."), connection && key == "token", visit) {
+		k, v := n.Content[i], n.Content[i+1]
+		if isMerge(k) {
+			merge = v
+			continue
+		}
+		name, ok := keyName(k)
+		if !ok || walked[name] {
+			continue
+		}
+		walked[name] = true
+		if !scalars(v, strings.TrimPrefix(path+"."+name, "."), connection && name == "token", visit) {
+			return false
+		}
+	}
+	if merge == nil {
+		return true
+	}
+	for _, m := range mergeSources(merge) {
+		if !mappingScalars(m, path, walked, visit) {
 			return false
 		}
 	}
 	return true
+}
+
+// isMerge is go-yaml v4's merge-key test on a parsed key: any scalar tagged
+// !!merge, which an explicit tag gives any name. A quoted "<<" resolves to
+// !!str and is an ordinary key, which the strict decode refuses.
+func isMerge(k *yaml.Node) bool {
+	return k.Kind == yaml.ScalarNode && k.ShortTag() == "!!merge"
+}
+
+// keyName is the field name the decode reads from key k, through an alias or a
+// tag such as !!binary, and false for a key it skips (a null) or cannot read.
+func keyName(k *yaml.Node) (string, bool) {
+	if deref(k).ShortTag() == "!!null" {
+		return "", false
+	}
+	var name string
+	if err := k.Decode(&name); err != nil {
+		return "", false
+	}
+	return name, true
+}
+
+// mergeSources returns the mappings a merge key's value names, in order. The
+// decode accepts only a mapping or a sequence of mappings there, so every
+// node it returns is a mapping.
+func mergeSources(v *yaml.Node) []*yaml.Node {
+	v = deref(v)
+	if v.Kind != yaml.SequenceNode {
+		return []*yaml.Node{v}
+	}
+	out := make([]*yaml.Node, 0, len(v.Content))
+	for _, e := range v.Content {
+		out = append(out, deref(e))
+	}
+	return out
+}
+
+func deref(n *yaml.Node) *yaml.Node {
+	if n.Kind == yaml.AliasNode && n.Alias != nil {
+		return n.Alias
+	}
+	return n
 }
 
 // readFile reads through an os.Root over the file's directory, so the open
@@ -391,12 +458,12 @@ func readFile(path string) ([]byte, error) {
 		return nil, err
 	}
 	defer root.Close()
-	f, _, err := atomicfile.OpenRegularInRoot(root, filepath.Base(path))
+	f, _, err := filesafe.OpenRegularInRoot(root, filepath.Base(path))
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
-	return atomicfile.ReadBoundedFile(context.Background(), f, maxConfigBytes)
+	return filesafe.ReadBoundedFile(context.Background(), f, maxConfigBytes)
 }
 
 // legacyEnvSet reports GITHUB_OWNER or GITHUB_TOKEN, the variables the
@@ -435,7 +502,7 @@ func (s source) duration(warns []Warning, key, raw string, def, lo, hi time.Dura
 	return clamped, warns
 }
 
-func connections(in []fileConnection, top []Exclude, src source) ([]Connection, []error) {
+func connections(in []fileConnection, top []Exclude, src source, unresolved []string) ([]Connection, []error) {
 	if len(in) == 0 {
 		return nil, []error{errors.New("the file declares no connection, and at least one connection is required")}
 	}
@@ -443,7 +510,7 @@ func connections(in []fileConnection, top []Exclude, src source) ([]Connection, 
 	seen := make(map[string]bool, len(in))
 	out := make([]Connection, 0, len(in))
 	for i := range in {
-		c, cerrs := connection(&in[i], i, top, src)
+		c, cerrs := connection(&in[i], i, top, src, unresolved)
 		errs = append(errs, cerrs...)
 		if c.Name != "" && seen[c.Name] {
 			errs = append(errs, fmt.Errorf("connection %q is named twice", src.show(connectionPath(i)+".name", c.Name)))
@@ -454,7 +521,7 @@ func connections(in []fileConnection, top []Exclude, src source) ([]Connection, 
 	return out, errs
 }
 
-func connection(fc *fileConnection, index int, top []Exclude, src source) (Connection, []error) {
+func connection(fc *fileConnection, index int, top []Exclude, src source, unresolved []string) (Connection, []error) {
 	name := strings.TrimSpace(fc.Name)
 	at := connectionPath(index)
 	label := fmt.Sprintf("connection %d", index+1)
@@ -478,7 +545,7 @@ func connection(fc *fileConnection, index int, top []Exclude, src source) (Conne
 	c.Exclude = append(slices.Clone(top), own...)
 	errs = append(errs, checkURL(label, "url", c.URL, true, c.AllowPlaintext)...)
 	errs = append(errs, checkURL(label, "api_url", c.APIURL, false, c.AllowPlaintext)...)
-	errs = append(errs, checkToken(label, c.Token, src[at+".token"])...)
+	errs = append(errs, checkToken(label, c.Token, src[at+".token"], unresolved)...)
 	var oerrs []error
 	c.Owners, oerrs = owners(label, at+".owners", fc.Owners, src)
 	errs = append(errs, oerrs...)
@@ -529,9 +596,10 @@ func validPort(p string) bool {
 
 // checkToken refuses a token not written as exactly one ${NAME} reference
 // (raw, before expansion), one naming a variable that is not allowed, unset
-// or blank. An error names the variable, never a value. The expanded token
-// is kept verbatim: the forge verifies its exact bytes.
-func checkToken(label, token, raw string) []error {
+// (in unresolved, the names the expansion did not find) or blank, and one
+// left unexpanded. An error names the variable, never a value. The expanded
+// token is kept verbatim: the forge verifies its exact bytes.
+func checkToken(label, token, raw string, unresolved []string) []error {
 	if strings.TrimSpace(raw) == "" {
 		return []error{fmt.Errorf("%s: token is required, as a ${NAME} reference such as ${GITHUB_TOKEN}", label)}
 	}
@@ -541,8 +609,11 @@ func checkToken(label, token, raw string) []error {
 		return []error{fmt.Errorf("%s: token must be one ${NAME} reference and nothing else, such as ${GITHUB_TOKEN}: the token's value comes from the environment, never from this file", label)}
 	case !allowedEnv(m[1]):
 		return []error{fmt.Errorf("%s: token references %s, which is not an allowed name (it must end in _TOKEN or start with FORGE_SCOUT_)", label, m[1])}
-	case token == raw:
+	case token == raw && slices.Contains(unresolved, m[1]):
 		return []error{fmt.Errorf("%s: token references %s, which is not set", label, m[1])}
+	case token == raw:
+		// yamlenv expands only !!str scalars, so a tagged one keeps its reference.
+		return []error{fmt.Errorf("%s: token references %s but was not expanded: write it as a plain or quoted ${NAME}, without a YAML tag", label, m[1])}
 	case strings.TrimSpace(token) == "":
 		return []error{fmt.Errorf("%s: token references %s, which is empty", label, m[1])}
 	}

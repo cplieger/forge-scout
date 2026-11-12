@@ -1,6 +1,15 @@
 # Monitoring and alerts
 
-This page lists the log lines forge-scout writes, shows how to load and pin the Grafana dashboard, and gives two Loki alert rules. It is for operators who run Loki and Grafana.
+This page lists the log lines forge-scout writes, shows how to load and pin the Grafana dashboard, and gives two Loki alert rules. The app reports through its JSON log, and its dashboard reads that log from Loki. It has no metrics page, so its alert rules are log rules.
+
+## What you get
+
+| You run | You get | You set up |
+| --- | --- | --- |
+| Prometheus, Mimir or VictoriaMetrics, with Alertmanager (the monitoring guide's starting stack adds Loki) | From a metric store alone, no alert and no dashboard, since forge-scout has no metrics page. With Loki added, the next row | Loki, as the starting stack runs it |
+| Loki and Alertmanager, no metric store | Both alert rules, and with Grafana the dashboard | A log collector for the container, the [rules](#alerting) in Loki's rules folder, and the [dashboard](#grafana-dashboard) imported into Grafana |
+| Docker or Unraid only | Docker health, which turns unhealthy when the scan loop stops, and `docker logs` | Something that watches Docker health |
+| One-shot `trigger` scans from a scheduler on a host | The exit code and the scan's lines in the scheduler's output | An alert on the job's exit code |
 
 ## Log lines
 
@@ -143,7 +152,7 @@ A connection's reads stop a tenth of its limit before it, one minute at most, so
 
 ## Grafana dashboard
 
-The dashboard needs Grafana 13.2 or newer and the container's log in Loki with a `container` label that holds the container name, which the Alloy config in the [monitoring guide](https://github.com/cplieger/docs/blob/main/docs/monitoring.md#the-smallest-stack-sends-notifications-only) sets. [Importing an app's dashboard](https://github.com/cplieger/docs/blob/main/docs/monitoring.md#importing-an-apps-dashboard) shows how to load [`grafana-dashboard.json`](../grafana-dashboard.json). The dashboard reads from your default Loki data source and needs no plugin. Its tabs follow the order you ask questions, and every tab but Scout health shows only what needs you: a tile that would read 0 and a table with no row are hidden.
+The dashboard needs Grafana 13.2 or newer and the container's log in Loki with a `container` label that holds the container name, which the Alloy config in the [monitoring guide](https://github.com/cplieger/docs/blob/main/docs/monitoring.md#the-starting-stack) sets. [Importing an app's dashboard](https://github.com/cplieger/docs/blob/main/docs/monitoring.md#importing-an-apps-dashboard) shows how to load [`grafana-dashboard.json`](../grafana-dashboard.json). The dashboard reads from your default Loki data source and needs no plugin. Its tabs follow the order you ask questions, and every tab but Scout health shows only what needs you: a tile that would read 0 and a table with no row are hidden.
 
 1. Overview holds a tile for each thing to act on: a stalled scout, a scan that is not whole, failing workflows, critical and high code-scanning alerts, pull requests with failing checks, pull requests and issues from other people, pull requests and issues untouched for 30 days, pull request checks the token cannot read, and Counts as of. Below them are the failing workflows, the pull requests needing attention with the reason for each, and the critical and high code-scanning alerts. When none of them has anything to show, a green All clear tile says so.
 2. CI runs holds the failed runs, the workflows GitHub disabled, the runs created per day by result and the failed runs per day by repository, the average run time, the runs that passed after a re-run and the slowest workflows.
@@ -277,13 +286,30 @@ groups:
 Notes on each rule:
 
 - `ForgeScoutScanDegraded` means scans of that connection keep failing to read a signal whole or to save the run state. The count tiles read "Partial" for a count not read whole, and other connections keep their own counts. The `cause` values are in the table under [Scan summary and integrity](#scan-summary-and-integrity). A connection that keeps running past its limit logs `cause` `scan_timeout` on every scan, so this rule catches it. A run state that cannot be saved logs `cause` `state_unwritable` on every connection, and a `/data` whose folder cannot be synced logs `state_not_durable`.
-- `ForgeScoutScanStalled` counts a stopped scan as finished, because a scan held back by the budget reserve is working as intended. It fires when the scan loop stops, the container stops or is renamed, or the log pipeline stops shipping.
+- `ForgeScoutScanStalled` counts a stopped scan as finished, because a scan held back by the budget reserve is working as intended. It fires when the scan loop stops, the container stops or is renamed, or the log pipeline stops shipping. The healthcheck turns the container unhealthy after 75 minutes, but that notifies nobody, so this rule is the alert for a stopped loop.
 
 Thresholds and the `severity` label are starting points. Both windows assume the default `scan_interval` of 15m. Two scans can end up to 3.1 intervals apart: the interval plus its 10% jitter, plus a scan at its limit of twice the interval.
 
 - The stall rule's 55m is a little over 3.5 intervals, so even the widest gap between two scans holds one.
 - The degraded rule needs two degraded scans in its window. Its 100m is more than 6.2 intervals, two of those gaps, so it keeps firing while every scan stays degraded. It resolves once fewer than two degraded scans fall in the last 100m.
 
-Widen both windows in proportion if you lengthen the interval. Change the `container` selector to the label your log collector sets, such as `job` or `service`, and route by whatever labels your Alertmanager uses.
+Widen both windows in proportion if you lengthen the interval. Change the `container` selector to the label your log collector sets, such as `job` or `service`.
 
-In a container the scan always runs in the main process, so these rules apply to every container deployment as written. If you run one-shot `trigger` scans from cron on a host, the lines land in your scheduler's output and not in a `forge-scout` container stream. Point the selectors there, and alert on the job's exit code for failed scans.
+In a container the scan always runs in the main process, so these rules apply to every container deployment as written. [Knowing the app is alive](#knowing-the-app-is-alive) covers one-shot `trigger` scans.
+
+## Knowing the app is alive
+
+forge-scout opens no port, so nothing outside the container can probe it. Load the stall rule, or watch Docker health.
+
+**What healthy means.** The scan loop refreshed its health file within the last three scan intervals plus one scan at its limit of twice the interval, 75 minutes at the default `scan_interval` of 15m. A forge that is down, a rejected token or a spent budget never makes the container unhealthy. Those show in the log as `scan degraded` or `scan stopped`, and `ForgeScoutScanDegraded` reports a connection whose scans stay degraded.
+
+**Docker health.** The image checks itself every 30 seconds with `/forge-scout health`, which reads the health file the scan loop refreshes at `/dev/shm/forge-scout.healthy`. If that file cannot be written, as under `ipc: none`, the check passes and the log says so once. Docker marks the container unhealthy after 3 failures, and allows 15 seconds after a start. Docker's health status notifies nobody on its own, and Docker does not restart an unhealthy container. Unhealthy is the signal to restart it.
+
+**Who is told.**
+
+| You run | forge-scout stops | The scan loop stops |
+| --- | --- | --- |
+| Loki with these rules | `ForgeScoutScanStalled`, after 55 minutes with no finished scan | `ForgeScoutScanStalled`, after 55 minutes |
+| A metric store without Loki, or Docker or Unraid only | Something that watches Docker health sees the container exit, and the restart policy restarts it | Something that watches Docker health sees it turn unhealthy after 75 minutes |
+
+**One-shot scans.** `forge-scout trigger` exits 0 when every connection read every signal its forge has whole, and 1 otherwise, as [One-shot scans](configuration.md#one-shot-scans) lists. A one-shot scan never touches the health file. If you run `trigger` scans from cron on a host, the lines land in your scheduler's output and not in a `forge-scout` container stream. Point the rule selectors there, and alert on the job's exit code for failed scans.
