@@ -5,7 +5,7 @@ This page covers what forge-scout exposes, how it handles tokens, the hardened c
 ## What it exposes
 
 - forge-scout runs no HTTP server and listens on no port, so nothing on the network can reach it. Its output is standard output, and its health is a file the scan loop refreshes in `/dev/shm`.
-- It sends only read requests, and only to the forges in its config file. Every connection is opened with writes refused, and it reads at most 8 MiB of each response body. A larger response fails that read.
+- It sends only read requests, and only to the forges in its config file. Every connection is opened with writes refused, and it reads at most 8 MiB of each response body. A larger response fails that read, so a hostile or broken server cannot fill its memory. One repository's code-scanning alerts are held to 8 MiB too, across all their pages, and past that the repository's code-scanning read fails.
 - A connection refuses a private or loopback address unless it sets `private_addresses: true`, and an `http://` address unless it sets `allow_plaintext: true`.
 - Owner and repository names are checked before they go into a request URL, which rejects path traversal and injection characters.
 - Each token is sent only to its own forge, as a request header, and is never logged. The startup lines log `token_set` with `true` or `false` instead. A config error names the variable a token comes from, never its value.
