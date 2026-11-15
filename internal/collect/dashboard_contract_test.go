@@ -330,6 +330,9 @@ func checkExpr(c contract, expr string) []string {
 	for _, m := range selectorRe.FindAllStringSubmatch(strings.ReplaceAll(masked, streamVar, ""), -1) {
 		problems = append(problems, "stream selector "+m[0]+", want "+streamVar)
 	}
+	for _, m := range literalStreamRe.FindAllString(masked, -1) {
+		problems = append(problems, "literal matcher "+m+", which only "+streamVar+" may set")
+	}
 	if m := logQueryRe.FindStringSubmatch(expr); m != nil {
 		return append(problems, checkPipeline(c, m[1], "$__range")...)
 	}
@@ -868,27 +871,6 @@ func TestDashboard_reads_only_what_a_scan_logs(t *testing.T) {
 // stream field may carry.
 var literalStreamRe = regexp.MustCompile(`\b(container|container_name|service_name|job|hostname)\s*(=~|!~|!=|=)`)
 
-// queryStrings is every LogQL text the dashboard sends: each panel query,
-// and each query variable's stream and the definition shown beside it.
-func queryStrings(d map[string]any) map[string]string {
-	out := map[string]string{}
-	for _, p := range dashboardPanels(d) {
-		for i, q := range p.queries {
-			out[fmt.Sprintf("panel %q query %d", p.title, i)] = q.expr
-		}
-	}
-	vars, _ := field(d, "spec", "variables").([]any)
-	for _, v := range vars {
-		if field(v, "kind") != "QueryVariable" {
-			continue
-		}
-		name, _ := field(v, "spec", "name").(string)
-		out["variable "+name+" stream"], _ = field(v, "spec", "query", "spec", "stream").(string)
-		out["variable "+name+" definition"], _ = field(v, "spec", "definition").(string)
-	}
-	return out
-}
-
 // checkStreamVariable reports how the stream field differs from an editable
 // selector that ships forge-scout's default container label.
 func checkStreamVariable(d map[string]any) []string {
@@ -922,17 +904,54 @@ func TestDashboard_reads_the_log_stream_from_the_stream_field(t *testing.T) {
 	for _, problem := range checkStreamVariable(d) {
 		t.Errorf("variable stream: %s", problem)
 	}
-	queries := queryStrings(d)
-	if len(queries) == 0 {
-		t.Fatalf("%s carries no query", dashboardPath)
+	vars, _ := field(d, "spec", "variables").([]any)
+	for _, v := range vars {
+		if field(v, "kind") != "QueryVariable" {
+			continue
+		}
+		if def, stream := field(v, "spec", "definition"), field(v, "spec", "query", "spec", "stream"); def != stream {
+			t.Errorf("variable %v: definition %v, want its stream %v", field(v, "spec", "name"), def, stream)
+		}
 	}
-	for where, q := range queries {
-		if !strings.Contains(q, streamVar) {
-			t.Errorf("%s does not read %s, so a collector labelling logs another way shows nothing\nexpr: %s", where, streamVar, q)
+}
+
+func TestDashboard_stream_field_check_rejects(t *testing.T) {
+	variable := func(edit func(spec map[string]any)) map[string]any {
+		spec := map[string]any{
+			"name":    "stream",
+			"label":   "forge-scout log stream",
+			"query":   streamDefault,
+			"current": map[string]any{"text": streamDefault, "value": streamDefault},
+			"hide":    "inControlsMenu",
 		}
-		if m := literalStreamRe.FindString(backtickedRe.ReplaceAllString(q, "``")); m != "" {
-			t.Errorf("%s carries the literal matcher %s, which only the stream field may set\nexpr: %s", where, m, q)
+		if edit != nil {
+			edit(spec)
 		}
+		return map[string]any{"kind": "TextVariable", "spec": spec}
+	}
+	dashboard := func(vars ...any) map[string]any {
+		return map[string]any{"spec": map[string]any{"variables": vars}}
+	}
+	if problems := checkStreamVariable(dashboard(variable(nil))); len(problems) != 0 {
+		t.Errorf("checkStreamVariable(the shipped field) = %v, want no problem", problems)
+	}
+	custom := variable(nil)
+	custom["kind"] = "CustomVariable"
+	const other = `{job="forge-scout"}`
+	cases := map[string]map[string]any{
+		"no field":        dashboard(),
+		"custom variable": dashboard(custom),
+		"other label":     dashboard(variable(func(s map[string]any) { s["label"] = "stream" })),
+		"other default":   dashboard(variable(func(s map[string]any) { s["query"] = other })),
+		"other current":   dashboard(variable(func(s map[string]any) { s["current"] = map[string]any{"text": streamDefault, "value": other} })),
+		"hidden":          dashboard(variable(func(s map[string]any) { s["hide"] = "hideVariable" })),
+	}
+	for name, d := range cases {
+		t.Run(name, func(t *testing.T) {
+			if problems := checkStreamVariable(d); len(problems) == 0 {
+				t.Error("checkStreamVariable reported nothing, want a problem")
+			}
+		})
 	}
 }
 
@@ -1544,6 +1563,7 @@ func TestDashboard_contract_check_rejects(t *testing.T) {
 		"msg alternation":    sel + " |= `scan ` | json msg=\"msg\" | msg=~`scan complete|scan stopped`",
 		"other selector":     `{job="forge-scout"} |= ` + "`scan complete` | json msg=\"msg\" | msg=`scan complete`",
 		"literal selector":   streamDefault + " |= `scan complete` | json msg=\"msg\" | msg=`scan complete`",
+		"collector label":    sel + " |= `scan complete` | json msg=\"msg\" | msg=`scan complete` | job=`forge-scout`",
 		"fixed window":       "sum(count_over_time(" + sel + " |= `scan complete` | json msg=\"msg\" | msg=`scan complete` [7d]))",
 		"hidden window":      "sum(last_over_time(" + sel + " |= `scan complete` | json msg=\"msg\", connection=\"connection\", open_prs=\"open_prs\" | msg=`scan complete` | unwrap open_prs [$window]) by (connection))",
 		"ungrouped unwrap":   "sum(last_over_time(" + sel + " |= `scan complete` | json msg=\"msg\", open_prs=\"open_prs\" | msg=`scan complete` | unwrap open_prs [$__range]))",
