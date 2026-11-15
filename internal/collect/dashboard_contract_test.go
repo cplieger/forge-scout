@@ -871,8 +871,6 @@ func TestDashboard_reads_only_what_a_scan_logs(t *testing.T) {
 // stream field may carry.
 var literalStreamRe = regexp.MustCompile(`\b(container|container_name|service_name|job|hostname)\s*(=~|!~|!=|=)`)
 
-// checkStreamVariable reports how the stream field differs from an editable
-// selector that ships forge-scout's default container label.
 func checkStreamVariable(d map[string]any) []string {
 	vars, _ := field(d, "spec", "variables").([]any)
 	for _, v := range vars {

@@ -4,7 +4,7 @@ The [shared contributing rules](https://github.com/cplieger/.github/blob/main/CO
 
 ## Rules
 
-Treat each `msg` string and field name logged in `internal/collect` as a shared contract. Rename it in every place that uses it, including `grafana-dashboard.json`, `docs/monitoring.md` and the README. The Go tests in `internal/collect/docs_test.go` check the cause table, the read-state fields and the `scan complete` fields of `docs/monitoring.md` against the code. The tests in `internal/collect/dashboard_contract_test.go` fail when a panel of `grafana-dashboard.json` reads a `msg` or field that the recorded scans do not log, maps fewer read states, causes or stop reasons than the code has, or counts `ci run` lines without the `connection`, `repo`, `run_id`, `state` and `updated_at` key. No test reads the README.
+Treat each `msg` string and field name logged in `internal/collect` as a shared contract. Rename it in every place that uses it, including `grafana-dashboard.json`, `docs/monitoring.md` and the README. The Go tests in `internal/collect/docs_test.go` check the cause table, the read-state fields and the `scan complete` fields of `docs/monitoring.md` against the code. The tests in `internal/collect/dashboard_contract_test.go` fail when a panel of `grafana-dashboard.json` reads a `msg` or field that the recorded scans do not log, maps fewer read states, causes or stop reasons than the code has, counts `ci run` lines without the `connection`, `repo`, `run_id`, `state` and `updated_at` key, or reads its log stream from anything but the **forge-scout log stream** field with its default `{container="forge-scout"}`. No test reads the README.
 
 Every forge read goes through `internal/forgeconn`, the one package that holds forgeapi's role and row types. `internal/config` uses only forgeapi's owner validator and `main` only its pinned GitHub API version. A read forgeapi does not model belongs in `internal/githubrest` when it is GitHub's, and is reported as unsupported on the other forges, never as 0.
 
@@ -19,7 +19,7 @@ A new signal touches eight places:
 7. A row in the log table of `docs/monitoring.md`, and the signal's name in its list of `_read` fields.
 8. The signal in the README's `## What it does` list, and in `## What each forge supports` when a forge lacks it.
 
-Save a `grafana-dashboard.json` change made in the Grafana UI with Export, then Export as code, choosing the V2 Resource model.
+Save a `grafana-dashboard.json` change made in the Grafana UI with Export, then Export as code, choosing the V2 Resource model. Set the **forge-scout log stream** field back to its default before you export.
 
 ## Releases
 

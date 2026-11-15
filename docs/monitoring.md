@@ -258,7 +258,7 @@ jq --arg s '{service_name="forge-scout"}' \
   grafana-dashboard.json > grafana-dashboard.new.json && mv grafana-dashboard.new.json grafana-dashboard.json
 ```
 
-A `GrafanaManifest` or Terraform needs the same change in the `spec` object it loads.
+The Helm chart's `url` form, a Terraform `http` data source and the OCI artifact load the release file as published, with no file to edit. Download the file, run the command above and load the edited copy instead, such as through the Helm chart's `json` form. A `GrafanaManifest` or Terraform resource needs the same change in the `spec` object it loads.
 
 ## Alerting
 
@@ -309,7 +309,7 @@ Thresholds and the `severity` label are starting points. Both windows assume the
 - The stall rule's 55m is a little over 3.5 intervals, so even the widest gap between two scans holds one.
 - The degraded rule needs two degraded scans in its window. Its 100m is more than 6.2 intervals, two of those gaps, so it keeps firing while every scan stays degraded. It resolves once fewer than two degraded scans fall in the last 100m.
 
-Widen both windows in proportion if you lengthen the interval. If your log collector labels the logs another way, change `{container="forge-scout"}` in both rules to the selector you set in the dashboard's **forge-scout log stream**, such as `{job="forge-scout"}`. With several containers, `ForgeScoutScanDegraded` can take a selector that matches all of them, because it counts each connection apart. `ForgeScoutScanStalled` fires only once every container its selector matches is silent, so keep one copy of it per container, each with that container's own selector and its own alert name.
+Widen both windows in proportion if you lengthen the interval. If your log collector labels the logs another way, change `{container="forge-scout"}` in both rules to the selector you set in the dashboard's **forge-scout log stream**, such as `{job="forge-scout"}`. With several containers whose connections have names no other container uses, `ForgeScoutScanDegraded` can take a selector that matches all of them, because it counts each connection apart. `ForgeScoutScanStalled` fires only once every container its selector matches is silent, so keep one copy of it per container, each with that container's own selector and its own alert name.
 
 In a container the scan always runs in the main process, so these rules apply to every container deployment as written. [Knowing the app is alive](#knowing-the-app-is-alive) covers one-shot `trigger` scans.
 
