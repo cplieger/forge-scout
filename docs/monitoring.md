@@ -198,7 +198,7 @@ Scan integrity shows the worst newest scan in the time range among the selected 
 
 Scout status reports whether the scan loop runs, so it reads every connection whatever the **Forge** filter. It reads Running while a connection's newest `scan complete` or `scan stopped` line is younger than 3.5 times the `scan_interval_s` that line carries, at the end of the time range. Two scans can end up to 3.1 intervals apart, so a slow scan still reads Running, and a new `scan_interval` needs no dashboard change. A time range shorter than the gap between two scans can hold no scan, and then Scout status reads "No data" and Scan integrity hides, while the tiles and the tables keep reading the last 7 days and All clear still shows when nothing else does. Scout stalled on the Overview reads the same lines over the last 7 days and shows "Stalled" while no connection's newest line is younger than 3.5 intervals. At the default `scan_interval` of 15m that is 52.5 minutes, close to the 55 minutes of silence after which `ForgeScoutScanStalled` fires. A scout silent for longer than 7 days shows nothing on the Overview.
 
-Every panel reads the stream from that field as `${stream}` and names the fields it reads, for example:
+Every panel reads the stream from the **forge-scout log stream** field as `${stream}` and names the fields it reads, for example:
 
 ```logql
 ${stream} |= `scan complete` | json msg="msg", forge="forge", connection="connection" | msg=`scan complete`

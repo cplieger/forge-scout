@@ -330,9 +330,10 @@ func checkExpr(c contract, expr string) []string {
 	for _, m := range selectorRe.FindAllStringSubmatch(strings.ReplaceAll(masked, streamVar, ""), -1) {
 		problems = append(problems, "stream selector "+m[0]+", want "+streamVar)
 	}
-	for _, m := range literalStreamRe.FindAllString(masked, -1) {
-		problems = append(problems, "literal matcher "+m+", which only "+streamVar+" may set")
+	for _, m := range streamFormRe.FindAllString(masked, -1) {
+		problems = append(problems, "stream field written as "+m+", want "+streamVar)
 	}
+	problems = append(problems, unextractedFilters(masked)...)
 	if m := logQueryRe.FindStringSubmatch(expr); m != nil {
 		return append(problems, checkPipeline(c, m[1], "$__range")...)
 	}
@@ -867,9 +868,38 @@ func TestDashboard_reads_only_what_a_scan_logs(t *testing.T) {
 	}
 }
 
-// literalStreamRe is a label matcher a log collector sets, which only the
-// stream field may carry.
-var literalStreamRe = regexp.MustCompile(`\b(container|container_name|service_name|job|hostname)\s*(=~|!~|!=|=)`)
+var (
+	// streamFormRe is another spelling of the stream field, which the
+	// pipeline patterns do not read, so its pipeline would go unchecked.
+	streamFormRe      = regexp.MustCompile(`\$stream\b|\$\{stream:`)
+	labelFilterRe     = regexp.MustCompile(`(?:\||\bor\b)\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?:=~|!~|!=|==|>=|<=|=|>|<)`)
+	labelFormatRe     = regexp.MustCompile(`\|\s*label_format\b([^|]*)`)
+	labelFormatNameRe = regexp.MustCompile(`([A-Za-z_][A-Za-z0-9_]*)\s*=`)
+)
+
+// unextractedFilters reports each label filter on a name no json or
+// label_format stage of the expression sets: such a name is a label the log
+// collector sets, so it would select the stream in place of the stream field.
+func unextractedFilters(masked string) []string {
+	known := map[string]bool{"__error__": true}
+	for _, stage := range jsonStageRe.FindAllStringSubmatch(masked, -1) {
+		for _, p := range jsonParamRe.FindAllStringSubmatch(stage[1], -1) {
+			known[p[1]] = true
+		}
+	}
+	for _, stage := range labelFormatRe.FindAllStringSubmatch(masked, -1) {
+		for _, n := range labelFormatNameRe.FindAllStringSubmatch(stage[1], -1) {
+			known[n[1]] = true
+		}
+	}
+	var problems []string
+	for _, m := range labelFilterRe.FindAllStringSubmatch(masked, -1) {
+		if !known[m[1]] {
+			problems = append(problems, "label filter on "+m[1]+", which the pipeline does not extract; only "+streamVar+" may select the stream")
+		}
+	}
+	return problems
+}
 
 func checkStreamVariable(d map[string]any) []string {
 	vars, _ := field(d, "spec", "variables").([]any)
@@ -1562,6 +1592,8 @@ func TestDashboard_contract_check_rejects(t *testing.T) {
 		"other selector":     `{job="forge-scout"} |= ` + "`scan complete` | json msg=\"msg\" | msg=`scan complete`",
 		"literal selector":   streamDefault + " |= `scan complete` | json msg=\"msg\" | msg=`scan complete`",
 		"collector label":    sel + " |= `scan complete` | json msg=\"msg\" | msg=`scan complete` | job=`forge-scout`",
+		"compose label":      sel + " |= `scan complete` | json msg=\"msg\" | msg=`scan complete` | compose_service=`forge-scout`",
+		"bare stream var":    "sum(count_over_time(" + sel + " |= `scan complete` | json msg=\"msg\" | msg=`scan complete` [$__range])) + sum(count_over_time($stream |= `scan complete` | json msg=\"msg\" | msg=`scan complete` [$__range]))",
 		"fixed window":       "sum(count_over_time(" + sel + " |= `scan complete` | json msg=\"msg\" | msg=`scan complete` [7d]))",
 		"hidden window":      "sum(last_over_time(" + sel + " |= `scan complete` | json msg=\"msg\", connection=\"connection\", open_prs=\"open_prs\" | msg=`scan complete` | unwrap open_prs [$window]) by (connection))",
 		"ungrouped unwrap":   "sum(last_over_time(" + sel + " |= `scan complete` | json msg=\"msg\", open_prs=\"open_prs\" | msg=`scan complete` | unwrap open_prs [$__range]))",
