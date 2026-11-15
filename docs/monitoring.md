@@ -156,9 +156,11 @@ The dashboard needs Grafana 13.2 or newer and the container's log in Loki. [Impo
 
 **forge-scout log stream**, in the dashboard's controls menu, is the Loki stream selector every panel reads. It is `{container="forge-scout"}` by default, the label the Alloy config in the [monitoring guide](https://github.com/cplieger/docs/blob/main/docs/monitoring.md#the-starting-stack) sets from the container name. Change it when your collector labels forge-scout's logs another way, such as `{service_name="forge-scout"}`, or when the container has another name.
 
-To keep a changed selector in a copy you imported by hand, save the dashboard with **Update default variable values** ticked, or the field returns to its default the next time the dashboard loads. A copy Grafana loads from a file, through a file provider, the Helm chart, a `GrafanaManifest` or Terraform, takes the field from that file each time it loads. Set your selector in the file instead, as [Pinning the dashboard](#pinning-the-dashboard) shows, and again whenever a newer release replaces the file.
+Grafana takes the field's default from the dashboard file each time it loads one. That covers an import over the old copy as well as a file provider, the Helm chart, a `GrafanaManifest` or Terraform. Set your selector in the file before you load it, as [Pinning the dashboard](#pinning-the-dashboard) shows, or set the field again after each load. Saving the dashboard with **Update default variable values** ticked keeps a changed field only until the next load. Without that box, the field returns to its default the next time you open the dashboard.
 
-With a selector that matches nothing, every panel is empty and All clear never shows. To show several forge-scout containers in one dashboard, set a selector that matches all of them, such as `{container=~"forge-scout.*"}`. Give each container's connections names no other container uses, because the dashboard picks each connection's newest scan by its name. Scout status, Scout stalled and All clear then read the freshest container, so a stopped container shows only in Last scan per connection on Scout health.
+With a selector that matches nothing, every panel is empty and All clear never shows. To show several forge-scout containers in one dashboard, set a selector that matches all of them, such as `{container=~"forge-scout.*"}`. Give each container's connections names no other container uses, because the dashboard picks each connection's newest scan by its name.
+
+Scout status stays Running while any connection's newest line is fresh, and Scout stalled shows only when every connection is stale. A stopped container's last complete scan still counts on the Overview tiles and item tables for 7 days. All clear stays hidden while that scan has a count to show, or while the container's newest scan in the time range did not finish whole. Last scan per connection and Scan integrity show it only while its line is inside the time range.
 
 1. Overview holds a tile for each thing to act on: a stalled scout, a scan that is not whole, failing workflows, critical and high code-scanning alerts, pull requests with failing checks, pull requests and issues from other people, pull requests and issues untouched for 30 days, pull request checks the token cannot read, and Counts as of. Below them are the failing workflows, the pull requests needing attention with the reason for each, and the critical and high code-scanning alerts. When none of them has anything to show, a green All clear tile says so.
 2. CI runs holds the failed runs, the workflows GitHub disabled, the runs created per day by result and the failed runs per day by repository, the average run time, the runs that passed after a re-run and the slowest workflows.
@@ -250,7 +252,7 @@ resource "grafana_apps_dashboard_dashboard_v2" "forge_scout" {
 }
 ```
 
-A copy loaded from a file takes the **forge-scout log stream** field from the file each time it loads. To read another selector, set it in the file's `stream` variable, in `query` and in both the `text` and `value` of `current`, and set it again after each new release. This command sets `{service_name="forge-scout"}`:
+To set the **forge-scout log stream** field in the file, set the `stream` variable's `query` and both the `text` and `value` of its `current`. This command sets `{service_name="forge-scout"}`:
 
 ```sh
 jq --arg s '{service_name="forge-scout"}' \
