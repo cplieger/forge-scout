@@ -154,9 +154,11 @@ A connection's reads stop a tenth of its limit before it, one minute at most, so
 
 The dashboard needs Grafana 13.2 or newer and the container's log in Loki. [Importing an app's dashboard](https://github.com/cplieger/docs/blob/main/docs/monitoring.md#importing-an-apps-dashboard) shows how to load [`grafana-dashboard.json`](../grafana-dashboard.json). The dashboard reads from your default Loki data source and needs no plugin. Its tabs follow the order you ask questions, and every tab but Scout health shows only what needs you: a tile that would read 0 and a table with no row are hidden.
 
-**forge-scout log stream**, in the dashboard's controls menu, is the Loki stream selector every panel reads. It is `{container="forge-scout"}` by default, the label the Alloy config in the [monitoring guide](https://github.com/cplieger/docs/blob/main/docs/monitoring.md#the-starting-stack) sets from the container name. Change it when your collector labels forge-scout's logs another way, such as `{service_name="forge-scout"}`, or when the container has another name. Then save the dashboard with **Update default variable values** ticked, or the field returns to its default the next time the dashboard loads.
+**forge-scout log stream**, in the dashboard's controls menu, is the Loki stream selector every panel reads. It is `{container="forge-scout"}` by default, the label the Alloy config in the [monitoring guide](https://github.com/cplieger/docs/blob/main/docs/monitoring.md#the-starting-stack) sets from the container name. Change it when your collector labels forge-scout's logs another way, such as `{service_name="forge-scout"}`, or when the container has another name.
 
-With a selector that matches nothing, every panel is empty and All clear never shows. To show several forge-scout containers in one dashboard, set a selector that matches all of them, such as `{container=~"forge-scout.*"}`. Give each container's connections names no other container uses, because the dashboard picks each connection's newest scan by its name.
+To keep a changed selector in a copy you imported by hand, save the dashboard with **Update default variable values** ticked, or the field returns to its default the next time the dashboard loads. A copy Grafana loads from a file, through a file provider, the Helm chart, a `GrafanaManifest` or Terraform, takes the field from that file each time it loads. Set your selector in the file instead, as [Pinning the dashboard](#pinning-the-dashboard) shows, and again whenever a newer release replaces the file.
+
+With a selector that matches nothing, every panel is empty and All clear never shows. To show several forge-scout containers in one dashboard, set a selector that matches all of them, such as `{container=~"forge-scout.*"}`. Give each container's connections names no other container uses, because the dashboard picks each connection's newest scan by its name. Scout status, Scout stalled and All clear then read the freshest container, so a stopped container shows only in Last scan per connection on Scout health.
 
 1. Overview holds a tile for each thing to act on: a stalled scout, a scan that is not whole, failing workflows, critical and high code-scanning alerts, pull requests with failing checks, pull requests and issues from other people, pull requests and issues untouched for 30 days, pull request checks the token cannot read, and Counts as of. Below them are the failing workflows, the pull requests needing attention with the reason for each, and the critical and high code-scanning alerts. When none of them has anything to show, a green All clear tile says so.
 2. CI runs holds the failed runs, the workflows GitHub disabled, the runs created per day by result and the failed runs per day by repository, the average run time, the runs that passed after a re-run and the slowest workflows.
@@ -248,6 +250,16 @@ resource "grafana_apps_dashboard_dashboard_v2" "forge_scout" {
 }
 ```
 
+A copy loaded from a file takes the **forge-scout log stream** field from the file each time it loads. To read another selector, set it in the file's `stream` variable, in `query` and in both the `text` and `value` of `current`, and set it again after each new release. This command sets `{service_name="forge-scout"}`:
+
+```sh
+jq --arg s '{service_name="forge-scout"}' \
+  '(.spec.variables[] | select(.spec.name == "stream") | .spec) |= (.query = $s | .current = {text: $s, value: $s})' \
+  grafana-dashboard.json > grafana-dashboard.new.json && mv grafana-dashboard.new.json grafana-dashboard.json
+```
+
+A `GrafanaManifest` or Terraform needs the same change in the `spec` object it loads.
+
 ## Alerting
 
 forge-scout has no metrics endpoint, so its state is in its logs. These rules are for Loki's ruler. Save the block below as a file in Loki's rules folder, as [Loading an app's alert rules](https://github.com/cplieger/docs/blob/main/docs/monitoring.md#loading-an-apps-alert-rules) shows. The first rule catches a connection whose scans ran but went blind. The second fires when no scan completes or stops at all.
@@ -297,7 +309,7 @@ Thresholds and the `severity` label are starting points. Both windows assume the
 - The stall rule's 55m is a little over 3.5 intervals, so even the widest gap between two scans holds one.
 - The degraded rule needs two degraded scans in its window. Its 100m is more than 6.2 intervals, two of those gaps, so it keeps firing while every scan stays degraded. It resolves once fewer than two degraded scans fall in the last 100m.
 
-Widen both windows in proportion if you lengthen the interval. If your log collector labels the logs another way, change `{container="forge-scout"}` in both rules to the selector you set in the dashboard's **forge-scout log stream**, such as `{job="forge-scout"}`.
+Widen both windows in proportion if you lengthen the interval. If your log collector labels the logs another way, change `{container="forge-scout"}` in both rules to the selector you set in the dashboard's **forge-scout log stream**, such as `{job="forge-scout"}`. With several containers, `ForgeScoutScanDegraded` can take a selector that matches all of them, because it counts each connection apart. `ForgeScoutScanStalled` fires only once every container its selector matches is silent, so keep one copy of it per container, each with that container's own selector and its own alert name.
 
 In a container the scan always runs in the main process, so these rules apply to every container deployment as written. [Knowing the app is alive](#knowing-the-app-is-alive) covers one-shot `trigger` scans.
 

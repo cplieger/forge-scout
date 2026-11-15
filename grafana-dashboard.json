@@ -15488,7 +15488,7 @@
         "spec": {
           "name": "stream",
           "label": "forge-scout log stream",
-          "description": "The Loki stream selector that picks forge-scout's container logs. The default, {container=\"forge-scout\"}, is the container label the Alloy config in the cplieger/docs monitoring guide sets from the container name. Change it when your collector labels forge-scout's logs another way.",
+          "description": "The Loki stream selector that picks forge-scout's container logs. The default, {container=\"forge-scout\"}, is the container label the Alloy config in the cplieger/docs monitoring guide sets from the container name. Change it when your collector labels forge-scout's logs another way. A copy Grafana loads from a file takes this field from the file, so set the selector in the file's stream variable.",
           "query": "{container=\"forge-scout\"}",
           "current": {
             "text": "{container=\"forge-scout\"}",

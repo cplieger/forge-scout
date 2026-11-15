@@ -68,7 +68,7 @@ services:
 6. Have your log collector [send the container's logs to Loki](https://github.com/cplieger/docs/blob/main/docs/monitoring.md#the-starting-stack).
 7. In Grafana, [import](https://github.com/cplieger/docs/blob/main/docs/monitoring.md#importing-an-apps-dashboard) [`grafana-dashboard.json`](grafana-dashboard.json). It reads from your default Loki data source.
 8. The dashboard reads the stream set in its **forge-scout log stream** field, in the dashboard's controls menu, `{container="forge-scout"}` by default. If your collector labels the logs another way, set your own selector in that field.
-9. If you changed the field, save the dashboard with **Update default variable values** ticked, or the field returns to its default the next time the dashboard loads.
+9. If you changed the field in a dashboard you imported by hand, save it with **Update default variable values** ticked, or the field returns to its default the next time the dashboard loads. A dashboard Grafana loads from a file, such as through the file provider the import guide sets up, takes the field from that file each time. Set your selector in the file instead, as [Pinning the dashboard](docs/monitoring.md#pinning-the-dashboard) shows.
 
 Run `docker logs forge-scout`. You should see one `"msg":"scan complete"` line with `"degraded":false` per connection. If a forge rejected the token or could not be reached, that connection logs `"msg":"repo discovery failed"`, and its `scan complete` line carries `"degraded":true`. [After the first start](docs/troubleshooting.md#after-the-first-start) explains a `"msg":"scan degraded"` or `"msg":"scan stopped"` line.
 
