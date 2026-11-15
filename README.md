@@ -65,8 +65,8 @@ services:
 3. Save [`config.example.yaml`](config.example.yaml) beside `compose.yaml`, then run `mkdir -p config && cp config.example.yaml config/config.yaml`. In `config/config.yaml`, set each connection's `url` and `owners`, and delete the connections you do not use.
 4. In the `environment:` block of `compose.yaml`, keep one line for each token variable the config names. For a connection the example does not have, add a line such as `GITLAB_TOKEN: "${GITLAB_TOKEN:-}"`.
 5. Run `mkdir -p data && sudo chown 1000:1000 data`, using your `PUID` and `PGID` when you set them. Then run `docker compose up -d`.
-6. Have your log collector [send the container's logs to Loki](https://github.com/cplieger/docs/blob/main/docs/monitoring.md#the-starting-stack) with the label `container="forge-scout"`, which every panel selects on.
-7. In Grafana, [import](https://github.com/cplieger/docs/blob/main/docs/monitoring.md#importing-an-apps-dashboard) [`grafana-dashboard.json`](grafana-dashboard.json). It reads from your default Loki data source.
+6. Have your log collector [send the container's logs to Loki](https://github.com/cplieger/docs/blob/main/docs/monitoring.md#the-starting-stack).
+7. In Grafana, [import](https://github.com/cplieger/docs/blob/main/docs/monitoring.md#importing-an-apps-dashboard) [`grafana-dashboard.json`](grafana-dashboard.json). It reads from your default Loki data source, and from the stream in **forge-scout log stream**, in the dashboard's controls menu, which is `{container="forge-scout"}` by default. If your collector labels the logs another way, set your own selector there, then save the dashboard to keep it.
 
 Run `docker logs forge-scout`. You should see one `"msg":"scan complete"` line with `"degraded":false` per connection. If a forge rejected the token or could not be reached, that connection logs `"msg":"repo discovery failed"`, and its `scan complete` line carries `"degraded":true`. [After the first start](docs/troubleshooting.md#after-the-first-start) explains a `"msg":"scan degraded"` or `"msg":"scan stopped"` line.
 
@@ -138,7 +138,7 @@ The healthcheck runs `/forge-scout health`, which fails when the scan loop has n
 
 ## Monitoring
 
-forge-scout writes one JSON log line for each open pull request, issue and code-scanning alert, each CI run that finished or changed state, and a `scan complete` summary per connection after each scan. The bundled dashboard reads them from Loki, and two Loki alert rules fire when a connection's scans go blind or no scan finishes. [Monitoring and alerts](docs/monitoring.md) lists the fields, the dashboard and the rules.
+forge-scout writes one JSON log line for each open pull request, issue and code-scanning alert, each CI run that finished or changed state, and a `scan complete` summary per connection after each scan. The bundled dashboard reads them from Loki through its **forge-scout log stream** field, `{container="forge-scout"}` by default, which you change when your collector labels the logs another way. Two Loki alert rules fire when a connection's scans go blind or no scan finishes. [Monitoring and alerts](docs/monitoring.md) lists the fields, the dashboard and the rules.
 
 ## Documentation
 

@@ -359,7 +359,7 @@ func TestDashboard_snapshot_label_lists_leave_out_what_changes_every_scan(t *tes
 }
 
 func TestDashboard_snapshot_check_rejects(t *testing.T) {
-	const sel = `{container="forge-scout"}`
+	const sel = streamVar
 	newest := "last_over_time(" + sel + " |= `scan complete` | json msg=\"msg\", connection=\"connection\", scan_id=\"scan_id\" | msg=`scan complete` | unwrap scan_id | __error__=\"\" [7d]) by (connection)"
 	rows := func(by, window string) string {
 		return "last_over_time(" + sel + " |= `open issue` | json msg=\"msg\", connection=\"connection\", scan_id=\"scan_id\", repo=\"repo\", number=\"number\", age_days=\"age_days\", forge_rank=\"forge_rank\" | msg=`open issue` | unwrap scan_id | __error__=\"\" [" + window + "]) by (" + by + ")"
@@ -1031,7 +1031,7 @@ func TestDashboard_a_connection_that_only_stopped_reads_partial(t *testing.T) {
 }
 
 func TestLokiModel_matches_loki_operators(t *testing.T) {
-	const sel = `{container="forge-scout"}`
+	const sel = streamVar
 	lines := []lokiLine{
 		newLokiLine(t, 1000, map[string]string{"msg": "scan complete", "connection": "a", "scan_id": "1000", "n": "3"}),
 		newLokiLine(t, 2000, map[string]string{"msg": "scan complete", "connection": "b", "scan_id": "2000", "n": "4"}),

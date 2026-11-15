@@ -152,7 +152,9 @@ A connection's reads stop a tenth of its limit before it, one minute at most, so
 
 ## Grafana dashboard
 
-The dashboard needs Grafana 13.2 or newer and the container's log in Loki with a `container` label that holds the container name, which the Alloy config in the [monitoring guide](https://github.com/cplieger/docs/blob/main/docs/monitoring.md#the-starting-stack) sets. [Importing an app's dashboard](https://github.com/cplieger/docs/blob/main/docs/monitoring.md#importing-an-apps-dashboard) shows how to load [`grafana-dashboard.json`](../grafana-dashboard.json). The dashboard reads from your default Loki data source and needs no plugin. Its tabs follow the order you ask questions, and every tab but Scout health shows only what needs you: a tile that would read 0 and a table with no row are hidden.
+The dashboard needs Grafana 13.2 or newer and the container's log in Loki. [Importing an app's dashboard](https://github.com/cplieger/docs/blob/main/docs/monitoring.md#importing-an-apps-dashboard) shows how to load [`grafana-dashboard.json`](../grafana-dashboard.json). The dashboard reads from your default Loki data source and needs no plugin. Its tabs follow the order you ask questions, and every tab but Scout health shows only what needs you: a tile that would read 0 and a table with no row are hidden.
+
+**forge-scout log stream**, in the dashboard's controls menu, is the Loki stream selector every panel reads. It is `{container="forge-scout"}` by default, the label Docker log collectors such as Alloy and Promtail give a container, and the one the Alloy config in the [monitoring guide](https://github.com/cplieger/docs/blob/main/docs/monitoring.md#the-starting-stack) sets. Change it when your collector labels forge-scout's logs another way, such as `{service_name="forge-scout"}`, or when the container has another name, then save the dashboard to keep it. With a selector that matches nothing, every panel is empty and All clear never shows.
 
 1. Overview holds a tile for each thing to act on: a stalled scout, a scan that is not whole, failing workflows, critical and high code-scanning alerts, pull requests with failing checks, pull requests and issues from other people, pull requests and issues untouched for 30 days, pull request checks the token cannot read, and Counts as of. Below them are the failing workflows, the pull requests needing attention with the reason for each, and the critical and high code-scanning alerts. When none of them has anything to show, a green All clear tile says so.
 2. CI runs holds the failed runs, the workflows GitHub disabled, the runs created per day by result and the failed runs per day by repository, the average run time, the runs that passed after a re-run and the slowest workflows.
@@ -190,10 +192,10 @@ Scan integrity shows the worst newest scan in the time range among the selected 
 
 Scout status reports whether the scan loop runs, so it reads every connection whatever the **Forge** filter. It reads Running while a connection's newest `scan complete` or `scan stopped` line is younger than 3.5 times the `scan_interval_s` that line carries, at the end of the time range. Two scans can end up to 3.1 intervals apart, so a slow scan still reads Running, and a new `scan_interval` needs no dashboard change. A time range shorter than the gap between two scans can hold no scan, and then Scout status reads "No data" and Scan integrity hides, while the tiles and the tables keep reading the last 7 days and All clear still shows when nothing else does. Scout stalled on the Overview reads the same lines over the last 7 days and shows "Stalled" while no connection's newest line is younger than 3.5 intervals. At the default `scan_interval` of 15m that is 52.5 minutes, close to the 55 minutes of silence after which `ForgeScoutScanStalled` fires. A scout silent for longer than 7 days shows nothing on the Overview.
 
-Every panel uses one Loki selector and names the fields it reads, for example:
+Every panel reads the stream from that field as `${stream}` and names the fields it reads, for example:
 
 ```logql
-{container="forge-scout"} |= `scan complete` | json msg="msg", forge="forge", connection="connection" | msg=`scan complete`
+${stream} |= `scan complete` | json msg="msg", forge="forge", connection="connection" | msg=`scan complete`
 ```
 
 ## Pinning the dashboard
@@ -293,7 +295,7 @@ Thresholds and the `severity` label are starting points. Both windows assume the
 - The stall rule's 55m is a little over 3.5 intervals, so even the widest gap between two scans holds one.
 - The degraded rule needs two degraded scans in its window. Its 100m is more than 6.2 intervals, two of those gaps, so it keeps firing while every scan stays degraded. It resolves once fewer than two degraded scans fall in the last 100m.
 
-Widen both windows in proportion if you lengthen the interval. Change the `container` selector to the label your log collector sets, such as `job` or `service`.
+Widen both windows in proportion if you lengthen the interval. If your log collector labels the logs another way, change `{container="forge-scout"}` in both rules to the selector you set in the dashboard's **forge-scout log stream**, such as `{job="forge-scout"}`.
 
 In a container the scan always runs in the main process, so these rules apply to every container deployment as written. [Knowing the app is alive](#knowing-the-app-is-alive) covers one-shot `trigger` scans.
 
