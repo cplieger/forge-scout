@@ -564,12 +564,14 @@ type lokiModel struct {
 }
 
 // prepare is expr as Grafana sends it: without a forge in vars the forge
-// filter is All, which matches every forge, so it is left out, and each
-// variable is substituted, the end of the range being at.
+// filter is All, which matches every forge, so it is left out, the stream
+// field keeps its default, and each variable is substituted, the end of the
+// range being at.
 func (m *lokiModel) prepare(expr string) string {
 	if _, ok := m.vars["forge"]; !ok {
 		expr = strings.ReplaceAll(expr, `| forge=~"$forge"`, "")
 	}
+	expr = strings.ReplaceAll(expr, streamVar, streamDefault)
 	expr = strings.ReplaceAll(expr, "$__range", lokiDuration(m.rangeWindow))
 	expr = strings.ReplaceAll(expr, "${__to:date:seconds}", strconv.FormatInt(m.at/1000, 10))
 	for k, v := range m.vars {

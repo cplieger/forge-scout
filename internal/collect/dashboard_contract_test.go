@@ -28,8 +28,8 @@ const dashboardPath = "../../grafana-dashboard.json"
 var (
 	// pipelineRe captures one log pipeline: a stream selector, its stages,
 	// and the range that closes it. No stage the dashboard uses holds a '['.
-	pipelineRe   = regexp.MustCompile(`\{[^{}]*\}((?:[^\[{]|\{\{[^}]*\}\})*)\[([^\]]+)\]`)
-	logQueryRe   = regexp.MustCompile(`^\{[^{}]*\}((?:[^\[{]|\{\{[^}]*\}\})*)$`)
+	pipelineRe   = regexp.MustCompile(`(?:\$\{stream\}|\{[^{}]*\})((?:[^\[{]|\{\{[^}]*\}\})*)\[([^\]]+)\]`)
+	logQueryRe   = regexp.MustCompile(`^(?:\$\{stream\}|\{[^{}]*\})((?:[^\[{]|\{\{[^}]*\}\})*)$`)
 	jsonStageRe  = regexp.MustCompile(`\|\s*json\b([^|]*)`)
 	jsonParamRe  = regexp.MustCompile(`([A-Za-z_][A-Za-z0-9_]*)\s*=\s*"([^"]*)"`)
 	msgEqRe      = regexp.MustCompile("(?:\\||\\bor)\\s*msg\\s*=\\s*`([^`]*)`")
@@ -44,6 +44,14 @@ var (
 	// timeMacroRe is Grafana's range boundary in a custom date format, which
 	// Grafana replaces with a number before Loki reads the query.
 	timeMacroRe = regexp.MustCompile(`\$\{__(from|to):date:[A-Za-z]+\}`)
+)
+
+// streamVar is how every query names forge-scout's log stream, and
+// streamDefault the selector the dashboard ships in it, which Grafana
+// substitutes before Loki reads the query.
+const (
+	streamVar     = "${stream}"
+	streamDefault = `{container="forge-scout"}`
 )
 
 // scanEnds selects the two lines that close a connection's scan.
@@ -315,11 +323,17 @@ func checkPipeline(c contract, stages, window string) []string {
 func checkExpr(c contract, expr string) []string {
 	expr = timeMacroRe.ReplaceAllString(expr, "0")
 	var problems []string
-	for _, m := range selectorRe.FindAllStringSubmatch(backtickedRe.ReplaceAllString(expr, "``"), -1) {
-		if m[0] != `{container="forge-scout"}` {
-			problems = append(problems, "stream selector "+m[0]+", want {container=\"forge-scout\"}")
-		}
+	masked := backtickedRe.ReplaceAllString(expr, "``")
+	if !strings.Contains(masked, streamVar) {
+		problems = append(problems, "no "+streamVar+" stream selector")
 	}
+	for _, m := range selectorRe.FindAllStringSubmatch(strings.ReplaceAll(masked, streamVar, ""), -1) {
+		problems = append(problems, "stream selector "+m[0]+", want "+streamVar)
+	}
+	for _, m := range streamFormRe.FindAllString(masked, -1) {
+		problems = append(problems, "stream field written as "+m+", want "+streamVar)
+	}
+	problems = append(problems, unextractedFilters(masked)...)
 	if m := logQueryRe.FindStringSubmatch(expr); m != nil {
 		return append(problems, checkPipeline(c, m[1], "$__range")...)
 	}
@@ -757,12 +771,12 @@ func TestDashboard_panel_titles_name_the_list_they_count(t *testing.T) {
 	query := func(fields ...string) dashQuery {
 		var parts []string
 		for _, f := range fields {
-			parts = append(parts, "sum(last_over_time({container=\"forge-scout\"} |= `scan ` | json msg=\"msg\", "+f+"=\""+f+"\" | "+scanEnds+" | unwrap "+f+" [$__range]) by (connection))")
+			parts = append(parts, "sum(last_over_time("+streamVar+" |= `scan ` | json msg=\"msg\", "+f+"=\""+f+"\" | "+scanEnds+" | unwrap "+f+" [$__range]) by (connection))")
 		}
 		return dashQuery{refID: "A", expr: strings.Join(parts, " + ")}
 	}
 	lines := func(msg string) dashQuery {
-		return dashQuery{refID: "B", expr: "{container=\"forge-scout\"} |= `" + msg + "` | json msg=\"msg\", repo=\"repo\" | msg=`" + msg + "`"}
+		return dashQuery{refID: "B", expr: streamVar + " |= `" + msg + "` | json msg=\"msg\", repo=\"repo\" | msg=`" + msg + "`"}
 	}
 	cases := []struct {
 		panel dashPanel
@@ -854,6 +868,121 @@ func TestDashboard_reads_only_what_a_scan_logs(t *testing.T) {
 	}
 }
 
+var (
+	// streamFormRe is another spelling of the stream field, which the
+	// pipeline patterns do not read, so its pipeline would go unchecked.
+	streamFormRe      = regexp.MustCompile(`\$stream\b|\$\{stream:`)
+	labelFilterRe     = regexp.MustCompile(`(?:\||\bor\b)\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?:=~|!~|!=|==|>=|<=|=|>|<)`)
+	labelFormatRe     = regexp.MustCompile(`\|\s*label_format\b([^|]*)`)
+	labelFormatNameRe = regexp.MustCompile(`([A-Za-z_][A-Za-z0-9_]*)\s*=`)
+)
+
+// unextractedFilters reports each label filter on a name no json or
+// label_format stage of the expression sets: such a name is a label the log
+// collector sets, so it would select the stream in place of the stream field.
+func unextractedFilters(masked string) []string {
+	known := map[string]bool{"__error__": true}
+	for _, stage := range jsonStageRe.FindAllStringSubmatch(masked, -1) {
+		for _, p := range jsonParamRe.FindAllStringSubmatch(stage[1], -1) {
+			known[p[1]] = true
+		}
+	}
+	for _, stage := range labelFormatRe.FindAllStringSubmatch(masked, -1) {
+		for _, n := range labelFormatNameRe.FindAllStringSubmatch(stage[1], -1) {
+			known[n[1]] = true
+		}
+	}
+	var problems []string
+	for _, m := range labelFilterRe.FindAllStringSubmatch(masked, -1) {
+		if !known[m[1]] {
+			problems = append(problems, "label filter on "+m[1]+", which the pipeline does not extract; only "+streamVar+" may select the stream")
+		}
+	}
+	return problems
+}
+
+func checkStreamVariable(d map[string]any) []string {
+	vars, _ := field(d, "spec", "variables").([]any)
+	for _, v := range vars {
+		if field(v, "spec", "name") != "stream" {
+			continue
+		}
+		var problems []string
+		if field(v, "kind") != "TextVariable" {
+			problems = append(problems, fmt.Sprintf("kind %v, want TextVariable", field(v, "kind")))
+		}
+		if field(v, "spec", "label") != "forge-scout log stream" {
+			problems = append(problems, fmt.Sprintf("label %v, want forge-scout log stream", field(v, "spec", "label")))
+		}
+		for _, path := range [][]string{{"spec", "query"}, {"spec", "current", "value"}, {"spec", "current", "text"}} {
+			if got := field(v, path...); got != streamDefault {
+				problems = append(problems, fmt.Sprintf("%s = %v, want %s", strings.Join(path, "."), got, streamDefault))
+			}
+		}
+		if field(v, "spec", "hide") == "hideVariable" {
+			problems = append(problems, "it is hidden, so a user cannot edit it")
+		}
+		return problems
+	}
+	return []string{"the dashboard declares no stream variable"}
+}
+
+func TestDashboard_reads_the_log_stream_from_the_stream_field(t *testing.T) {
+	d := loadDashboard(t)
+	for _, problem := range checkStreamVariable(d) {
+		t.Errorf("variable stream: %s", problem)
+	}
+	vars, _ := field(d, "spec", "variables").([]any)
+	for _, v := range vars {
+		if field(v, "kind") != "QueryVariable" {
+			continue
+		}
+		if def, stream := field(v, "spec", "definition"), field(v, "spec", "query", "spec", "stream"); def != stream {
+			t.Errorf("variable %v: definition %v, want its stream %v", field(v, "spec", "name"), def, stream)
+		}
+	}
+}
+
+func TestDashboard_stream_field_check_rejects(t *testing.T) {
+	variable := func(edit func(spec map[string]any)) map[string]any {
+		spec := map[string]any{
+			"name":    "stream",
+			"label":   "forge-scout log stream",
+			"query":   streamDefault,
+			"current": map[string]any{"text": streamDefault, "value": streamDefault},
+			"hide":    "inControlsMenu",
+		}
+		if edit != nil {
+			edit(spec)
+		}
+		return map[string]any{"kind": "TextVariable", "spec": spec}
+	}
+	dashboard := func(vars ...any) map[string]any {
+		return map[string]any{"spec": map[string]any{"variables": vars}}
+	}
+	if problems := checkStreamVariable(dashboard(variable(nil))); len(problems) != 0 {
+		t.Errorf("checkStreamVariable(the shipped field) = %v, want no problem", problems)
+	}
+	custom := variable(nil)
+	custom["kind"] = "CustomVariable"
+	const other = `{job="forge-scout"}`
+	cases := map[string]map[string]any{
+		"no field":        dashboard(),
+		"custom variable": dashboard(custom),
+		"other label":     dashboard(variable(func(s map[string]any) { s["label"] = "stream" })),
+		"other default":   dashboard(variable(func(s map[string]any) { s["query"] = other })),
+		"other current":   dashboard(variable(func(s map[string]any) { s["current"] = map[string]any{"text": streamDefault, "value": other} })),
+		"hidden":          dashboard(variable(func(s map[string]any) { s["hide"] = "hideVariable" })),
+	}
+	for name, d := range cases {
+		t.Run(name, func(t *testing.T) {
+			if problems := checkStreamVariable(d); len(problems) == 0 {
+				t.Error("checkStreamVariable reported nothing, want a problem")
+			}
+		})
+	}
+}
+
 func TestDashboard_item_tables_are_snapshots_or_bounded_event_reads(t *testing.T) {
 	for _, p := range dashboardPanels(loadDashboard(t)) {
 		for _, problem := range checkPanel(&p) {
@@ -933,7 +1062,7 @@ func TestDashboard_snapshot_trends_read_each_connections_newest_scan(t *testing.
 		t.Fatalf("%s carries no chart over the scan summary lines", dashboardPath)
 	}
 	read := func(fn, key string) string {
-		return "sum by (msg) (" + fn + "_over_time({container=\"forge-scout\"} |= `scan complete` | json msg=\"msg\", connection=\"connection\", " +
+		return "sum by (msg) (" + fn + "_over_time(" + streamVar + " |= `scan complete` | json msg=\"msg\", connection=\"connection\", " +
 			key + "=\"" + key + "\" | msg=`scan complete` | unwrap " + key + " | __error__=\"\" [$__interval]) by (connection, msg))"
 	}
 	bad := map[string]string{
@@ -1014,7 +1143,7 @@ func TestDashboard_snapshot_trends_count_only_whole_reads(t *testing.T) {
 	if trends == 0 {
 		t.Fatalf("%s carries no chart of a scan summary count", dashboardPath)
 	}
-	const sel = `{container="forge-scout"}`
+	const sel = streamVar
 	counted := func(field, filter string) string {
 		return "last_over_time(" + sel + " |= `scan complete` | json msg=\"msg\", connection=\"connection\", " + field + "=\"" + field + "\"" +
 			" | msg=`scan complete`" + filter + " | unwrap " + field + " | __error__=\"\" [$__interval]) by (connection, msg, forge)"
@@ -1298,7 +1427,7 @@ func TestDashboard_item_tables_show_the_connection(t *testing.T) {
 	if tables == 0 {
 		t.Fatalf("%s carries no item table", dashboardPath)
 	}
-	const sel = `{container="forge-scout"}`
+	const sel = streamVar
 	read := sel + " |= `slow workflow` | json msg=\"msg\", connection=\"connection\", repo=\"repo\" | msg=`slow workflow` "
 	withCell := dashQuery{expr: read + repoCell, maxLines: 21}
 	noConn := dashQuery{expr: sel + " |= `slow workflow` | json msg=\"msg\", repo=\"repo\" | msg=`slow workflow`", maxLines: 21}
@@ -1449,7 +1578,7 @@ func TestDashboard_contract_check_rejects(t *testing.T) {
 		"scan complete": {"open_prs": true, "connection": true, "forge": true, "scan_id": true},
 		"open issue":    {"repo": true, "scan_id": true},
 	}
-	const sel = `{container="forge-scout"}`
+	const sel = streamVar
 	runs := sel + " |= `ci run` | json msg=\"msg\", connection=\"connection\", repo=\"repo\", run_id=\"run_id\", state=\"state\", updated_at=\"updated_at\" | msg=`ci run`"
 	cases := map[string]string{
 		"unlogged msg":       sel + " |= `made up` | json msg=\"msg\" | msg=`made up`",
@@ -1461,6 +1590,10 @@ func TestDashboard_contract_check_rejects(t *testing.T) {
 		"regex alternative":  sel + " | json msg=\"msg\" | msg=~`scan .*`",
 		"msg alternation":    sel + " |= `scan ` | json msg=\"msg\" | msg=~`scan complete|scan stopped`",
 		"other selector":     `{job="forge-scout"} |= ` + "`scan complete` | json msg=\"msg\" | msg=`scan complete`",
+		"literal selector":   streamDefault + " |= `scan complete` | json msg=\"msg\" | msg=`scan complete`",
+		"collector label":    sel + " |= `scan complete` | json msg=\"msg\" | msg=`scan complete` | job=`forge-scout`",
+		"compose label":      sel + " |= `scan complete` | json msg=\"msg\" | msg=`scan complete` | compose_service=`forge-scout`",
+		"bare stream var":    "sum(count_over_time(" + sel + " |= `scan complete` | json msg=\"msg\" | msg=`scan complete` [$__range])) + sum(count_over_time($stream |= `scan complete` | json msg=\"msg\" | msg=`scan complete` [$__range]))",
 		"fixed window":       "sum(count_over_time(" + sel + " |= `scan complete` | json msg=\"msg\" | msg=`scan complete` [7d]))",
 		"hidden window":      "sum(last_over_time(" + sel + " |= `scan complete` | json msg=\"msg\", connection=\"connection\", open_prs=\"open_prs\" | msg=`scan complete` | unwrap open_prs [$window]) by (connection))",
 		"ungrouped unwrap":   "sum(last_over_time(" + sel + " |= `scan complete` | json msg=\"msg\", open_prs=\"open_prs\" | msg=`scan complete` | unwrap open_prs [$__range]))",
@@ -1836,7 +1969,7 @@ func TestDashboard_day_charts_read_the_day_lines(t *testing.T) {
 	if charts == 0 {
 		t.Fatalf("%s carries no per-day chart", dashboardPath)
 	}
-	const sel = `{container="forge-scout"}`
+	const sel = streamVar
 	read := sel + " |= `ci day` | json msg=\"msg\", connection=\"connection\", repo=\"repo\", day=\"day\", failing=\"failing\" | msg=`ci day` "
 	const inRange = "| label_format daystart=`{{ toDateInZone \"2006-01-02\" \"UTC\" .day | unixEpoch }}` | daystart >= ${__from:date:seconds} "
 	days := read + inRange + "| unwrap failing"
@@ -1924,8 +2057,8 @@ func TestDashboard_shape(t *testing.T) {
 			}
 		}
 	}
-	if !slices.Equal(names, []string{"datasource", "forge", "security_forges", connectionsVar, "split"}) {
-		t.Errorf("variables = %v, want [datasource forge security_forges %s split]", names, connectionsVar)
+	if !slices.Equal(names, []string{"datasource", "stream", "forge", "security_forges", connectionsVar, "split"}) {
+		t.Errorf("variables = %v, want [datasource stream forge security_forges %s split]", names, connectionsVar)
 	}
 	want := map[string]any{"name": "${datasource}"}
 	panels := dashboardPanels(d)
@@ -2010,7 +2143,7 @@ func TestDashboard_scan_integrity_reads_each_connections_newest_verdict(t *testi
 	for _, problem := range checkIntegrity(&p) {
 		t.Errorf("panel %q: %s\nexpr: %s", p.title, problem, p.queries[0].expr)
 	}
-	const sel = `{container="forge-scout"}`
+	const sel = streamVar
 	bad := map[string]string{
 		"degraded lines": "count(sum by (connection) (count_over_time(" + sel + " |= `scan degraded` | json msg=\"msg\", connection=\"connection\" | msg=`scan degraded` [$__range])))",
 		"scan complete only": "sum(last_over_time(" + sel + " |= `scan complete` | json msg=\"msg\", connection=\"connection\", degraded=\"degraded\" | msg=`scan complete`" +
@@ -2054,7 +2187,7 @@ func TestDashboard_scout_status_judges_the_newest_scan_by_its_interval(t *testin
 	for _, problem := range checkScoutStatus(&p) {
 		t.Errorf("panel %q: %s\nexpr: %s", p.title, problem, p.queries[0].expr)
 	}
-	const window = "sum(count_over_time({container=\"forge-scout\"} |= `scan ` | json msg=\"msg\" | " + scanEnds + " [$window])) or vector(0)"
+	const window = "sum(count_over_time(" + streamVar + " |= `scan ` | json msg=\"msg\" | " + scanEnds + " [$window])) or vector(0)"
 	if problems := checkScoutStatus(&dashPanel{queries: []dashQuery{{expr: window}}}); len(problems) == 0 {
 		t.Error("checkScoutStatus(a count of scans in a fixed window) reported nothing, want a violation")
 	}
@@ -2091,7 +2224,7 @@ func TestDashboard_scout_health_counts_degraded_scans_by_connection_and_cause(t 
 	for _, problem := range checkDegradedInRange(&p) {
 		t.Errorf("panel %q: %s", p.title, problem)
 	}
-	read := "count_over_time({container=\"forge-scout\"} |= `scan degraded` | json msg=\"msg\", connection=\"connection\", cause=\"cause\" | msg=`scan degraded` "
+	read := "count_over_time(" + streamVar + " |= `scan degraded` | json msg=\"msg\", connection=\"connection\", cause=\"cause\" | msg=`scan degraded` "
 	bad := map[string]dashQuery{
 		"per day":        {expr: "sum by (connection, cause) (" + read + "[$__interval]))"},
 		"no connection":  {expr: "sum by (cause) (" + read + "[$__range]))", instant: true},
@@ -2174,7 +2307,7 @@ func TestDashboard_failed_reads_count_each_signal_a_scan_failed(t *testing.T) {
 	for _, problem := range checkFailedReads(&p) {
 		t.Errorf("panel %q: %s", p.title, problem)
 	}
-	read := "count_over_time({container=\"forge-scout\"} |= `scan complete` | json msg=\"msg\", degraded=\"degraded\", failed_signals=\"failed_signals\" | msg=`scan complete` | degraded=`true` "
+	read := "count_over_time(" + streamVar + " |= `scan complete` | json msg=\"msg\", degraded=\"degraded\", failed_signals=\"failed_signals\" | msg=`scan complete` | degraded=`true` "
 	perSignal := func(filter func(string) string) []dashQuery {
 		var qs []dashQuery
 		for _, n := range familyNames {
@@ -2335,7 +2468,7 @@ func TestDashboard_day_charts_stand_each_point_on_the_day_it_counts(t *testing.T
 		}
 	}
 	const inRange = "| label_format daystart=`{{ toDateInZone \"2006-01-02\" \"UTC\" .day | unixEpoch }}` | daystart >= ${__from:date:seconds} "
-	stops := "{container=\"forge-scout\"} |= `scan stopped` | json msg=\"msg\", reason=\"reason\" | msg=`scan stopped` "
+	stops := streamVar + " |= `scan stopped` | json msg=\"msg\", reason=\"reason\" | msg=`scan stopped` "
 	utcDay := "| label_format day=`{{ (__timestamp__).UTC.Format \"2006-01-02\" }}` "
 	dayTransforms := []map[string]any{
 		{"group": "convertFieldType", "conversions": []any{map[string]any{"targetField": "day", "destinationType": "time", "dateFormat": "YYYY-MM-DD"}}},
@@ -2420,7 +2553,7 @@ func TestDashboard_last_scan_per_connection_reads_one_scan_line(t *testing.T) {
 	for _, problem := range checkLastScan(&p) {
 		t.Errorf("panel %q: %s", p.title, problem)
 	}
-	const sel = `{container="forge-scout"}`
+	const sel = streamVar
 	verdict := sel + " |= `scan ` | json msg=\"msg\", connection=\"connection\", "
 	good := []dashQuery{
 		{instant: true, expr: "last_over_time(" + verdict + "scan_id=\"scan_id\" | " + scanEnds + " | label_format scan_id=`{{ if .scan_id }}{{ .scan_id }}{{ else }}NaN{{ end }}` | unwrap scan_id [$__range]) by (connection)"},
