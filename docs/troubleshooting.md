@@ -12,7 +12,7 @@ The container stays healthy through a failed scan, a rejected token or a spent b
 
 Each connection ends its scan with one `"msg":"scan complete"` line, and the `connection` field names which one. If a forge rejected the token or could not be reached, its connection logs `"msg":"repo discovery failed"`, then `"msg":"scan degraded"`, and still ends with `"msg":"scan complete"`, but with `"degraded":true`. A connection that stopped early logs `"msg":"scan stopped"` and no `scan complete`.
 
-If the log shows `scan complete` lines but every dashboard panel is empty, the dashboard's **forge-scout log stream** selects no stream in Loki. Set it to the labels your collector puts on the container's logs, as [Grafana dashboard](monitoring.md#grafana-dashboard) shows.
+If the log shows `scan complete` lines but every dashboard panel is empty, open Grafana Explore on your default Loki data source and run the selector set in the dashboard's **forge-scout log stream**. If it returns no lines, the field names labels your collector does not set, or the logs do not reach that Loki. Set the field to the labels your collector puts on the container's logs, as [Grafana dashboard](monitoring.md#grafana-dashboard) shows.
 
 ## Problem lines and fixes
 

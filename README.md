@@ -67,7 +67,8 @@ services:
 5. Run `mkdir -p data && sudo chown 1000:1000 data`, using your `PUID` and `PGID` when you set them. Then run `docker compose up -d`.
 6. Have your log collector [send the container's logs to Loki](https://github.com/cplieger/docs/blob/main/docs/monitoring.md#the-starting-stack).
 7. In Grafana, [import](https://github.com/cplieger/docs/blob/main/docs/monitoring.md#importing-an-apps-dashboard) [`grafana-dashboard.json`](grafana-dashboard.json). It reads from your default Loki data source.
-8. The dashboard reads the stream set in its **forge-scout log stream** field, in the dashboard's controls menu, `{container="forge-scout"}` by default. If your collector labels the logs another way, set your own selector in that field. Then save the dashboard with **Update default variable values** ticked, or the field returns to its default the next time the dashboard loads.
+8. The dashboard reads the stream set in its **forge-scout log stream** field, in the dashboard's controls menu, `{container="forge-scout"}` by default. If your collector labels the logs another way, set your own selector in that field.
+9. If you changed the field, save the dashboard with **Update default variable values** ticked, or the field returns to its default the next time the dashboard loads.
 
 Run `docker logs forge-scout`. You should see one `"msg":"scan complete"` line with `"degraded":false` per connection. If a forge rejected the token or could not be reached, that connection logs `"msg":"repo discovery failed"`, and its `scan complete` line carries `"degraded":true`. [After the first start](docs/troubleshooting.md#after-the-first-start) explains a `"msg":"scan degraded"` or `"msg":"scan stopped"` line.
 
