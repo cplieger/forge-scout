@@ -19,7 +19,6 @@ import (
 
 	"github.com/cplieger/forge-scout/internal/forge"
 	"github.com/cplieger/forge-scout/internal/ghquota"
-	"github.com/cplieger/forge-scout/internal/spend"
 	"github.com/cplieger/go/httpclient"
 	"github.com/cplieger/go/ssrf"
 )
@@ -826,17 +825,26 @@ func validating(body string, asked *[]string) http.HandlerFunc {
 }
 
 // meteredClient serves h to a client making one attempt per request, every
-// attempt counted by the returned spend meter, priced as GitHub's.
-func meteredClient(t *testing.T, h http.HandlerFunc) (*Client, *spend.Meter) {
+// attempt on the wire counted by the returned counter.
+func meteredClient(t *testing.T, h http.HandlerFunc) (*Client, *atomic.Int32) {
 	t.Helper()
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
-	spent := new(spend.Meter)
-	spent.Name(forge.ProductGitHub)
+	sent := new(atomic.Int32)
 	hc := httpclient.New(5 * time.Second)
-	hc.Transport = spent.Observe(http.DefaultTransport)
+	hc.Transport = countingTransport{next: http.DefaultTransport, sent: sent}
 	c := New(hc, srv.URL, "test-token", testVersion, armed(), slog.New(slog.DiscardHandler), httpclient.WithMaxAttempts(1))
-	return c, spent
+	return c, sent
+}
+
+type countingTransport struct {
+	next http.RoundTripper
+	sent *atomic.Int32
+}
+
+func (c countingTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	c.sent.Add(1)
+	return c.next.RoundTrip(r)
 }
 
 func TestReads_an_unchanged_page_is_revalidated_and_billed_nothing(t *testing.T) {
@@ -860,7 +868,7 @@ func TestReads_an_unchanged_page_is_revalidated_and_billed_nothing(t *testing.T)
 			if n, err := tc.read(c); err != nil || n != 2 {
 				t.Fatalf("Setup: first read = %d rows, %v, want 2", n, err)
 			}
-			before := spent.Spent()
+			before := spent.Load()
 			n, err := tc.read(c)
 			if err != nil || n != 2 {
 				t.Errorf("second read = %d rows, %v, want the 2 rows of the held answer", n, err)
@@ -868,8 +876,8 @@ func TestReads_an_unchanged_page_is_revalidated_and_billed_nothing(t *testing.T)
 			if !slices.Equal(asked, []string{"", `"v1"`}) {
 				t.Errorf("If-None-Match sent = %q, want none on the first read and the held ETag on the second", asked)
 			}
-			if got, want := spent.Spent().Minus(before), (spend.Spend{Sent: 1}); got != want {
-				t.Errorf("spend of the second read = %+v, want %+v: one attempt on the wire, its conditional 304 billed nothing", got, want)
+			if got := spent.Load() - before; got != 1 {
+				t.Errorf("attempts of the second read = %d, want 1 conditional request on the wire", got)
 			}
 			if got, want := c.ReadCache(), (forge.ReadCache{Hits: 1, Misses: 1, Saved: 1}); got != want {
 				t.Errorf("ReadCache = %+v, want %+v: GitHub bills no 304 to a conditional request", got, want)
@@ -889,8 +897,8 @@ func TestReads_a_304_to_an_unconditional_request_is_billed_and_fails_the_read(t 
 	if err == nil {
 		t.Errorf("Workflows answered 304 with nothing held = %+v, want a failed read, never an empty listing", got)
 	}
-	if s := spent.Spent(); s.Sent != int(calls.Load()) || s.REST != s.Sent || s.Sent < 1 {
-		t.Errorf("spend = %+v over %d requests, want each attempt sent and billed: GitHub exempts only a 304 to a conditional request", s, calls.Load())
+	if s := spent.Load(); s != calls.Load() || s < 1 {
+		t.Errorf("attempts = %d over %d requests served, want each attempt on the wire", s, calls.Load())
 	}
 	if rc := c.ReadCache(); rc.Saved != 0 || rc.Hits != 0 {
 		t.Errorf("ReadCache = %+v, want no hit or saving from a 304 nothing held vouched for", rc)

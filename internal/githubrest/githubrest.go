@@ -23,7 +23,7 @@ import (
 
 	"github.com/cplieger/forge-scout/internal/forge"
 	"github.com/cplieger/forge-scout/internal/ghquota"
-	"github.com/cplieger/forge-scout/internal/urlsafe"
+	"github.com/cplieger/forgeapi/v3"
 	"github.com/cplieger/go/httpcache"
 	"github.com/cplieger/go/httpclient"
 	"github.com/cplieger/go/jsonx"
@@ -367,10 +367,10 @@ func decodeWorkflows(repo string, body []byte) ([]forge.Workflow, error) {
 // segments splits a GitHub display path into its owner and name, each safe
 // to place in a URL path.
 func segments(path string) (owner, name string, err error) {
-	owner, name, ok := strings.Cut(path, "/")
-	if !ok || !urlsafe.IsSafeURLSegment(owner) || !urlsafe.IsSafeURLSegment(name) {
-		return "", "", fmt.Errorf("repository path %q is not a safe owner/name pair", path)
+	if err := forgeapi.ValidateSelector(forgeapi.FamilyGitHub, path); err != nil {
+		return "", "", fmt.Errorf("repository path %q is not a safe owner/name pair: %w", path, err)
 	}
+	owner, name, _ = strings.Cut(path, "/")
 	return owner, name, nil
 }
 

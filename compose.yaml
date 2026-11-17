@@ -7,17 +7,7 @@ services:
     # Must own the ./data host folder. If .env sets PUID and PGID, those numbers are used.
     user: "${PUID:-1000}:${PGID:-1000}"
 
-    environment:
-      # Every token the config file names as ${...}. Put each in a .env file beside this file.
-      # The github connection in config.example.yaml reads this token. Delete this line when you remove that connection.
-      GITHUB_TOKEN: "${GITHUB_TOKEN:-}"
-      # The forgejo connection in config.example.yaml reads this token. Delete this line when you remove that connection.
-      FORGEJO_TOKEN: "${FORGEJO_TOKEN:-}"
-
     volumes:
-      # Run "mkdir -p config && cp config.example.yaml config/config.yaml", then edit
-      # config/config.yaml before the first start.
-      - "./config:/config:ro"
-      # The run state. Run "mkdir -p data && sudo chown 1000:1000 data" before the first start.
+      # forge-scout's data. Run "mkdir -p data && sudo chown 1000:1000 data" before the first start.
       # If .env sets PUID and PGID, use those numbers.
       - "./data:/data"

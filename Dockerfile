@@ -10,7 +10,7 @@ COPY internal/ internal/
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /forge-scout .
-RUN mkdir -p /out/data /out/config
+RUN mkdir -p /out/data
 COPY LICENSE NOTICE THIRD_PARTY_NOTICES.md ./
 COPY scripts/collect-licenses.sh scripts/
 RUN sh scripts/collect-licenses.sh --name forge-scout .
@@ -19,7 +19,6 @@ FROM gcr.io/distroless/static-debian13:nonroot@sha256:aafe993665bf6200db38a02c11
 
 COPY --chmod=755 --from=builder /forge-scout /forge-scout
 COPY --chown=65532:65532 --from=builder /out/data /data
-COPY --chown=65532:65532 --from=builder /out/config /config
 COPY --from=builder /out/usr/share/licenses /usr/share/licenses
 USER nonroot:nonroot
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 --start-period=15s \

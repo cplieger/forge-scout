@@ -21,8 +21,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/cplieger/forge-scout/internal/config"
 )
 
 // Product is the product a fake answers as.
@@ -149,16 +147,6 @@ func New(product Product, w World) *Server {
 	s := &Server{product: product, world: w, cost: 1}
 	s.Server = httptest.NewServer(http.HandlerFunc(s.serve))
 	return s
-}
-
-// Connection is a config.Connection pointing at the fake, owner-scoped to the
-// World's owner, with private addresses and plaintext allowed.
-func (s *Server) Connection(name string) config.Connection {
-	return config.Connection{
-		Name: name, URL: s.URL, Token: "test-token", Owners: []string{s.world.Owner},
-		PrivateAddresses: true, AllowPlaintext: true,
-		Security: config.Security{Enabled: true, SkipForks: true, SkipRepos: map[string]bool{}},
-	}
 }
 
 // SetGraphQLCost changes the points each later GitHub document reports it
