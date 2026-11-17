@@ -18,7 +18,7 @@ forge-scout listens on two ports:
 
 | Port | Setting | Serves |
 | --- | --- | --- |
-| `7466` | `LISTEN_ADDR` | the web page |
+| `7466` | `LISTEN_ADDR` | the web page and its API; until they land, every path answers `404` with the code `not_found` |
 | `7467` | `OPS_LISTEN_ADDR` | `GET /healthz` and `GET /metrics` only, for the container healthcheck and a Prometheus scraper |
 
 Both ports answer only a request whose `Host` is `localhost` or a name in `ALLOWED_HOSTS`, or one sent from inside the container over loopback; any other host gets `403` with the code `host_not_allowed`. Neither port asks for a sign-in yet, so publish them only to a network you trust.

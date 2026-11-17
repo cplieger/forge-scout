@@ -15,7 +15,8 @@ services:
       ALLOWED_HOSTS: "forge-scout,scout.example.com"
 
     ports:
-      # The web page. Neither port asks for a sign-in yet: publish them only to a network you trust.
+      # The web page and its API, which answer not_found on every path until they land.
+      # Neither port asks for a sign-in yet: publish them only to a network you trust.
       - "7466:7466"
       # /healthz and /metrics only. Leave it unpublished when the scraper shares a Docker network.
       - "7467:7467"
