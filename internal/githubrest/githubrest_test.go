@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/cplieger/forge-scout/internal/forge"
+	"github.com/cplieger/forge-scout/internal/forgeconn/forgeconntest"
 	"github.com/cplieger/forge-scout/internal/ghquota"
 	"github.com/cplieger/go/httpclient"
 	"github.com/cplieger/go/ssrf"
@@ -971,5 +972,43 @@ func TestReads_a_304_to_an_unconditional_request_is_billed_and_fails_the_read(t 
 	}
 	if rc := c.ReadCache(); rc.Saved != 0 || rc.Hits != 0 {
 		t.Errorf("ReadCache = %+v, want no hit or saving from a 304 nothing held vouched for", rc)
+	}
+}
+
+func TestReads_the_GitHub_fake_answers_in_the_shapes_this_client_reads(t *testing.T) {
+	created := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	srv := forgeconntest.New(forgeconntest.GitHub, &forgeconntest.World{Owner: "o", Repos: []forgeconntest.Repo{{
+		Name: "r", DefaultBranch: "main",
+		Alerts: []forgeconntest.Alert{
+			{Number: 1, Created: created, Rule: "go/sql-injection", Severity: "high", Tool: "CodeQL", Path: "db/query.go", StartLine: 42},
+			{Number: 2, Created: created, Rule: "go/unused", Tool: "CodeQL"},
+		},
+		Workflows: []forgeconntest.Workflow{{ID: 1, Name: "ci", Path: ".github/workflows/ci.yaml", State: "disabled_inactivity"}},
+	}}})
+	t.Cleanup(srv.Close)
+	c := New(httpclient.New(5*time.Second), srv.URL+"/api/v3", forgeconntest.Token, testVersion, armed(), slog.New(slog.DiscardHandler), httpclient.WithMaxAttempts(1))
+	alerts, err := c.CodeScanningAlerts(t.Context(), &repo)
+	if err != nil {
+		t.Fatalf("CodeScanningAlerts: %v", err)
+	}
+	if alerts.End != forge.EndWhole || len(alerts.Rows) != 2 {
+		t.Fatalf("alerts = %+v, want both, read whole", alerts)
+	}
+	placed, unplaced := alerts.Rows[0], alerts.Rows[1]
+	if placed.Rule != "go/sql-injection" || placed.SecuritySeverity != "high" || placed.Path != "db/query.go" || placed.StartLine != 42 || !placed.CreatedAt.Equal(created) {
+		t.Errorf("alert 1 = %+v, want the high go/sql-injection at db/query.go:42", placed)
+	}
+	if unplaced.Path != "" || unplaced.StartLine != 0 || unplaced.SecuritySeverity != "" {
+		t.Errorf("alert 2 = %+v, want no location and no severity", unplaced)
+	}
+	defs, err := c.Workflows(t.Context(), &repo)
+	if err != nil {
+		t.Fatalf("Workflows: %v", err)
+	}
+	if len(defs.Rows) != 1 || defs.Rows[0].Path != ".github/workflows/ci.yaml" || !defs.Rows[0].DisabledByInactivity() {
+		t.Errorf("workflows = %+v, want ci disabled for inactivity", defs.Rows)
+	}
+	if u := srv.Unhandled(); len(u) != 0 {
+		t.Errorf("the fake did not serve %q", u)
 	}
 }

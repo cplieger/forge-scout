@@ -54,7 +54,7 @@ func (s *Server) giteaRepoRoute(w http.ResponseWriter, r *http.Request) bool {
 		s.giteaRuns(w, r, repo)
 	case strings.HasPrefix(tail, "commits/") && strings.HasSuffix(tail, "/status"):
 		sha := strings.TrimSuffix(strings.TrimPrefix(tail, "commits/"), "/status")
-		state, ok := repo.Checks[sha]
+		state, ok := repo.combined(sha)
 		statuses := []map[string]any{}
 		if ok {
 			statuses = append(statuses, map[string]any{"context": "ci", "description": "", "target_url": "", "status": state})
@@ -128,7 +128,7 @@ func (s *Server) giteaSearch(w http.ResponseWriter, r *http.Request) bool {
 			row := map[string]any{
 				"number": it.Number, "state": "open", "title": it.Title, "body": "",
 				"user": map[string]any{"login": it.Author}, "created_at": stamp(it.Created), "updated_at": stamp(it.Updated),
-				"labels":     labelObjects(it.Labels, "ededed"),
+				"labels":     labelObjects(it.Labels),
 				"repository": map[string]any{"full_name": s.fullName(repo), "name": repo.Name, "owner": s.world.Owner},
 			}
 			if prs {

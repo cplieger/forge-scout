@@ -139,6 +139,10 @@ type Head struct {
 	Approvals        int
 	ChangesRequested int
 	Read             bool
+	// ChecksRefused is checks the forge refused to this credential while it
+	// answered the rest of the head: Checks is then CheckUnknown with no
+	// count, and a retry with the same credential answers the same.
+	ChecksRefused bool
 }
 
 // Issue is one issue.
@@ -333,13 +337,25 @@ type CutReason string
 
 // The CutReason members.
 const (
-	CutRateLimited    CutReason = "rate_limited"
-	CutDeferred       CutReason = "deferred"
-	CutResultWindow   CutReason = "result_window"
-	CutPaginationCap  CutReason = "pagination_cap"
-	CutCeiling        CutReason = "ceiling"
+	// CutRateLimited is a page the forge's spent budget stopped.
+	CutRateLimited CutReason = "rate_limited"
+	// CutDeferred is a page held back unsent, at the read reserve or by the
+	// forge library's own pacing.
+	CutDeferred CutReason = "deferred"
+	// CutResultWindow is a search that stops serving rows before its own
+	// stated total.
+	CutResultWindow CutReason = "result_window"
+	// CutPaginationCap is a page cap the forge library reached with no
+	// continuation left to follow.
+	CutPaginationCap CutReason = "pagination_cap"
+	// CutCeiling is forge-scout's own page ceiling for the read.
+	CutCeiling CutReason = "ceiling"
+	// CutGraphQLPartial is a page answered with data beside errors, or with
+	// a row whose repository it left out.
 	CutGraphQLPartial CutReason = "graphql_partial"
-	CutForbiddenPart  CutReason = "forbidden_part"
+	// CutUnknown is a page the forge library marked partial for a reason it
+	// documents on no page.
+	CutUnknown CutReason = "unknown"
 )
 
 // Listing is a read's rows and how it ended. Cut is set only when End is

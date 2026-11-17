@@ -1,8 +1,9 @@
 package forge
 
 // RepoKey names one repository of one connection. Repo is the forge
-// library's stable repository id, never the display path, so a rename or a
-// transfer keeps the key.
+// library's repository id, which it derives from the repository's path
+// without case: a rename or a transfer changes it, and reads of the old id
+// answer the error code repo_ref_stale.
 type RepoKey struct {
 	Connection string
 	Repo       string

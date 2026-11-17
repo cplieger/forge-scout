@@ -27,12 +27,6 @@ func gitlabStatus(outcome string) string {
 	}
 }
 
-func (s *Server) throttle() int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.projectsThrottle
-}
-
 func (s *Server) serveGitLab(w http.ResponseWriter, r *http.Request, line string) (string, bool) {
 	h := w.Header()
 	h.Set("X-Gitlab-Meta", `{"correlation_id":"fake-correlation","version":"1"}`)
@@ -41,7 +35,7 @@ func (s *Server) serveGitLab(w http.ResponseWriter, r *http.Request, line string
 	h.Set("RateLimit-Limit", "2000")
 	h.Set("RateLimit-Remaining", itoa(remaining))
 	h.Set("RateLimit-Reset", itoa(int(reset.Unix())))
-	if limit := s.throttle(); limit > 0 && strings.HasSuffix(r.URL.Path, "/projects") {
+	if limit := s.projectsThrottle; limit > 0 && strings.HasSuffix(r.URL.Path, "/projects") {
 		h.Set("RateLimit-Name", "burst_traffic_per_user_free_plan")
 		h.Set("RateLimit-Limit", itoa(limit))
 		h.Set("RateLimit-Remaining", itoa(limit-1))
@@ -193,7 +187,7 @@ func (s *Server) gitlabProject(w http.ResponseWriter, r *http.Request, rest stri
 		rows = s.gitlabPipelines(r, repo)
 	case strings.HasPrefix(tail, "repository/commits/") && strings.HasSuffix(tail, "/statuses"):
 		sha := strings.TrimSuffix(strings.TrimPrefix(tail, "repository/commits/"), "/statuses")
-		if state, ok := repo.Checks[sha]; ok {
+		if state, ok := repo.combined(sha); ok {
 			rows = append(rows, map[string]any{"name": "ci", "description": "", "target_url": "", "status": gitlabStatus(state), "sha": sha})
 		}
 	case tail == "merge_requests" || tail == "issues":
