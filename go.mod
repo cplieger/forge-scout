@@ -7,7 +7,9 @@ require (
 	github.com/cplieger/forgeapi/v3 v3.0.0-dev.2
 	github.com/cplieger/go/httpcache v1.1.0
 	github.com/cplieger/go/httpclient v1.2.0
+	github.com/cplieger/go/httpserver/v2 v2.0.0-dev.2
 	github.com/cplieger/go/jsonx v1.1.0
+	github.com/cplieger/go/measure/v2 v2.0.0
 	github.com/cplieger/go/slogx v1.1.0
 	github.com/cplieger/go/ssrf v1.1.0
 )
