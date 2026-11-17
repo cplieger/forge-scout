@@ -100,26 +100,10 @@ func segments(escaped string) ([]string, bool) {
 	return parts, true
 }
 
-// githubRoute is a repository route's pattern, the item number, run id or
-// label name segments standing as {n}, {id} and {name}, with those values.
-func githubRoute(method string, parts []string) (pattern string, args []string) {
-	shape := append([]string(nil), parts...)
-	if len(shape) >= 2 && (shape[0] == "issues" || shape[0] == "pulls") {
-		shape[1], args = "{n}", append(args, parts[1])
-	}
-	if len(shape) == 4 && shape[0] == "issues" && shape[2] == "labels" {
-		shape[3], args = "{name}", append(args, parts[3])
-	}
-	if len(shape) >= 3 && shape[0] == "actions" && shape[1] == "runs" {
-		shape[2], args = "{id}", append(args, parts[2])
-	}
-	return method + " " + strings.Join(shape, "/"), args
-}
-
 // githubRepoRoute answers one repository route, reporting whether it serves
 // it.
 func (s *Server) githubRepoRoute(w http.ResponseWriter, r *http.Request, repo *Repo, parts []string) bool {
-	pattern, args := githubRoute(r.Method, parts)
+	pattern, args := restRoute(r.Method, parts)
 	switch pattern {
 	case "GET ":
 		s.githubRepoRecord(w, repo)

@@ -51,14 +51,33 @@ func mergeable(srv *forgeconntest.Server) {
 }
 
 // armable makes pull request #2 one whose merge can be armed and not made
-// now, and returns its head: GitHub arms a merge over failing checks, GitLab
-// only over a running pipeline.
+// now, and returns its head: GitHub, Gitea and Forgejo arm a merge over
+// failing checks, GitLab only over a running pipeline.
 func armable(t *testing.T, p forgeconntest.Product, srv *forgeconntest.Server) string {
 	t.Helper()
 	mergeable(srv)
-	head := per(t, p, map[forgeconntest.Product]string{forgeconntest.GitHub: failed, forgeconntest.GitLab: running})
+	head := per(t, p, map[forgeconntest.Product]string{
+		forgeconntest.GitHub: failed, forgeconntest.GitLab: running, forgeconntest.Gitea: failed, forgeconntest.Forgejo: failed,
+	})
 	srv.PushHead("app", 2, head)
 	return head
+}
+
+// armed reports whether pr's merge is armed: as read, or on Gitea and
+// Forgejo, whose answers carry no armed flag, as the fake holds it.
+func armed(t *testing.T, p forgeconntest.Product, srv *forgeconntest.Server, pr *forge.PullRequest) bool {
+	t.Helper()
+	switch p {
+	case forgeconntest.Gitea, forgeconntest.Forgejo:
+		if pr.Head.AutoMergeArmed != forge.SupportUnknown {
+			t.Errorf("#%d armed = %q, want unknown: the answer carries no armed flag", pr.Key.Number, pr.Head.AutoMergeArmed)
+		}
+		return srv.PR("app", pr.Key.Number).AutoMerge
+	}
+	if pr.Head.AutoMergeArmed == forge.SupportUnknown {
+		t.Errorf("#%d armed = unknown, want it read", pr.Key.Number)
+	}
+	return pr.Head.AutoMergeArmed == forge.SupportYes
 }
 
 // mergeCase is one merge the forge or forgeapi refuses.
@@ -83,8 +102,10 @@ func testMerge(t *testing.T, p forgeconntest.Product) {
 		}
 		// GitHub merges in the background and its answer has no verdict.
 		want := per(t, p, map[forgeconntest.Product]forge.MergeOutcome{
-			forgeconntest.GitHub: {State: forge.MergeOutcomeAccepted, Code: forgeapi.CodeAlreadyEnqueued, Queue: forge.QueueUnknown, QueuePosition: forge.CountUnknown},
-			forgeconntest.GitLab: {State: forge.MergeOutcomeMerged, Queue: forge.QueueNone, QueuePosition: forge.CountUnknown},
+			forgeconntest.GitHub:  {State: forge.MergeOutcomeAccepted, Code: forgeapi.CodeAlreadyEnqueued, Queue: forge.QueueUnknown, QueuePosition: forge.CountUnknown},
+			forgeconntest.GitLab:  {State: forge.MergeOutcomeMerged, Queue: forge.QueueNone, QueuePosition: forge.CountUnknown},
+			forgeconntest.Gitea:   {State: forge.MergeOutcomeMerged, Queue: forge.QueueNone, QueuePosition: forge.CountUnknown},
+			forgeconntest.Forgejo: {State: forge.MergeOutcomeMerged, Queue: forge.QueueNone, QueuePosition: forge.CountUnknown},
 		})
 		if out != want {
 			t.Errorf("Merge = %+v, want %+v", out, want)
@@ -106,8 +127,17 @@ func testMerge(t *testing.T, p forgeconntest.Product) {
 		}
 		// GitHub refuses a moved head 400 and a merge it cannot make 405;
 		// GitLab refuses one it can neither make nor arm 405, a draft or a
-		// conflict it could arm 422, and a moved head 409, in that order.
+		// conflict it could arm 422, and a moved head 409, in that order;
+		// Gitea and Forgejo refuse a merge they cannot make 405 and a moved
+		// head 409, naming neither cause.
+		gitea := []mergeCase{
+			{name: "head_moved", number: 1, req: forgeconn.MergeRequest{HeadSHA: failed}, kind: forge.KindConflict, code: forgeapi.CodeNotMergeable, status: http.StatusConflict, sent: true},
+			{name: "strategy_turned_off", number: 1, req: forgeconn.MergeRequest{HeadSHA: passed, Strategy: "rebase"}, kind: forge.KindNotMergeable, code: forgeapi.CodeNotMergeable, status: http.StatusMethodNotAllowed, sent: true},
+			{name: "checks_failing", number: 2, req: forgeconn.MergeRequest{HeadSHA: failed}, kind: forge.KindNotMergeable, code: forgeapi.CodeNotMergeable, status: http.StatusMethodNotAllowed, sent: true},
+		}
 		cases := append(local, per(t, p, map[forgeconntest.Product][]mergeCase{
+			forgeconntest.Gitea:   gitea,
+			forgeconntest.Forgejo: gitea,
 			forgeconntest.GitHub: {
 				{name: "head_moved", number: 1, req: forgeconn.MergeRequest{HeadSHA: failed}, kind: forge.KindNotMergeable, code: forgeapi.CodeNotMergeable, status: http.StatusBadRequest, sent: true},
 				{name: "strategy_turned_off", number: 1, req: forgeconn.MergeRequest{HeadSHA: passed, Strategy: "rebase"}, kind: forge.KindNotMergeable, code: forgeapi.CodeNotMergeable, status: http.StatusMethodNotAllowed, sent: true},
@@ -143,8 +173,8 @@ func testMerge(t *testing.T, p forgeconntest.Product) {
 				if got := len(srv.Requests()) > sent; got != tc.sent {
 					t.Errorf("a request was sent = %v, want %v", got, tc.sent)
 				}
-				if pr := readPR(t, c, tc.number); pr.State != forge.ItemOpen || pr.Head.AutoMergeArmed != forge.SupportNo {
-					t.Errorf("ReadPR after the refusal = state %q armed %q, want open with nothing armed", pr.State, pr.Head.AutoMergeArmed)
+				if pr := readPR(t, c, tc.number); pr.State != forge.ItemOpen || armed(t, p, srv, &pr) {
+					t.Errorf("ReadPR after the refusal = state %q, want open with nothing armed", pr.State)
 				}
 				handledAll(t, srv)
 			})
@@ -161,8 +191,8 @@ func testMerge(t *testing.T, p forgeconntest.Product) {
 		if out.State != forge.MergeOutcomeEnqueued || out.Code != "" {
 			t.Errorf("Merge = %+v, want enqueued with no code", out)
 		}
-		if pr := readPR(t, c, 2); pr.State != forge.ItemOpen || pr.Head.AutoMergeArmed != forge.SupportYes {
-			t.Errorf("ReadPR after arming = state %q armed %q, want open and armed", pr.State, pr.Head.AutoMergeArmed)
+		if pr := readPR(t, c, 2); pr.State != forge.ItemOpen || !armed(t, p, srv, &pr) {
+			t.Errorf("ReadPR after arming = state %q, want open and armed", pr.State)
 		}
 		handledAll(t, srv)
 	})
@@ -175,6 +205,7 @@ func testMerge(t *testing.T, p forgeconntest.Product) {
 		}
 		want := per(t, p, map[forgeconntest.Product]forge.MergeOutcomeState{
 			forgeconntest.GitHub: forge.MergeOutcomeAccepted, forgeconntest.GitLab: forge.MergeOutcomeMerged,
+			forgeconntest.Gitea: forge.MergeOutcomeMerged, forgeconntest.Forgejo: forge.MergeOutcomeMerged,
 		})
 		if out.State != want {
 			t.Errorf("Merge = %+v, want %q", out, want)
@@ -195,8 +226,8 @@ func testCancelAutoMerge(t *testing.T, p forgeconntest.Product) {
 	if err := c.CancelAutoMerge(t.Context(), appItem(2)); err != nil {
 		t.Fatalf("CancelAutoMerge: %v", err)
 	}
-	if pr := readPR(t, c, 2); pr.Head.AutoMergeArmed != forge.SupportNo || pr.State != forge.ItemOpen {
-		t.Errorf("ReadPR after the cancel = state %q armed %q, want open with nothing armed", pr.State, pr.Head.AutoMergeArmed)
+	if pr := readPR(t, c, 2); armed(t, p, srv, &pr) || pr.State != forge.ItemOpen {
+		t.Errorf("ReadPR after the cancel = state %q, want open with nothing armed", pr.State)
 	}
 	if err := c.CancelAutoMerge(t.Context(), appItem(2)); err != nil {
 		t.Errorf("CancelAutoMerge with nothing armed = %v, want success", err)
@@ -227,10 +258,14 @@ func testReopenPR(t *testing.T, p forgeconntest.Product) {
 		t.Errorf("ReadPR after reopening = state %q, want open", pr.State)
 	}
 	t.Run("merged", func(t *testing.T) {
-		// GitHub refuses the transition 422; GitLab's update ignores an event
-		// the state cannot take and answers 200.
+		// GitHub refuses the transition 422, Gitea and Forgejo 412; GitLab's
+		// update ignores an event the state cannot take and answers 200.
 		err := c.ReopenPR(t.Context(), appItem(3))
 		switch p {
+		case forgeconntest.Gitea, forgeconntest.Forgejo:
+			if fe := wantErr(t, err, forge.KindUpstream, ""); fe.Status != http.StatusPreconditionFailed {
+				t.Errorf("ReopenPR of a merged pull request = status %d, want 412", fe.Status)
+			}
 		case forgeconntest.GitHub:
 			if fe := wantErr(t, err, forge.KindUpstream, forgeapi.CodeValidation); fe.Status != http.StatusUnprocessableEntity {
 				t.Errorf("ReopenPR of a merged pull request = status %d, want 422", fe.Status)
@@ -362,15 +397,22 @@ func testRerunFailedChecks(t *testing.T, p forgeconntest.Product) {
 	t.Run("head_with_nothing_failed", func(t *testing.T) {
 		wantErr(t, c.RerunFailedChecks(t.Context(), appItem(1), passed), forge.KindConflict, forgeapi.CodeRunNotFailed)
 	})
-	// GitHub resolves a run on the pin without reading the pull request, so
-	// a pin no run carries is stale; GitLab reads the merge request's head
-	// and its pipeline.
+	// GitHub, Gitea and Forgejo resolve a run on the pin without reading the
+	// pull request, so a pin no run carries is stale; GitLab reads the merge
+	// request's head and its pipeline.
+	onPin := map[forgeconntest.Product]string{
+		forgeconntest.GitHub: forgeapi.CodeStaleHead, forgeconntest.GitLab: forgeapi.CodeRunNotFailed,
+		forgeconntest.Gitea: forgeapi.CodeStaleHead, forgeconntest.Forgejo: forgeapi.CodeStaleHead,
+	}
 	t.Run("head_no_run_carries", func(t *testing.T) {
-		code := per(t, p, map[forgeconntest.Product]string{forgeconntest.GitHub: forgeapi.CodeStaleHead, forgeconntest.GitLab: forgeapi.CodeRunNotFailed})
+		code := per(t, p, onPin)
 		wantErr(t, c.RerunFailedChecks(t.Context(), appItem(4), bare), forge.KindConflict, code)
 	})
 	t.Run("pin_not_the_head", func(t *testing.T) {
-		code := per(t, p, map[forgeconntest.Product]string{forgeconntest.GitHub: forgeapi.CodeRunNotFailed, forgeconntest.GitLab: forgeapi.CodeStaleHead})
+		code := per(t, p, map[forgeconntest.Product]string{
+			forgeconntest.GitHub: forgeapi.CodeRunNotFailed, forgeconntest.GitLab: forgeapi.CodeStaleHead,
+			forgeconntest.Gitea: forgeapi.CodeRunNotFailed, forgeconntest.Forgejo: forgeapi.CodeRunNotFailed,
+		})
 		wantErr(t, c.RerunFailedChecks(t.Context(), appItem(4), passed), forge.KindConflict, code)
 	})
 	handledAll(t, srv)

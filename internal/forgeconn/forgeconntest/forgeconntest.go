@@ -264,6 +264,20 @@ func (s *Server) PushHead(repo string, number int, sha string) {
 	s.EditPR(repo, number, true, func(it *Item) { it.HeadSHA = sha })
 }
 
+// PR is a copy of pull request number of repo as the fake holds it now, for
+// what a product's answers do not carry, such as Gitea's armed merge.
+func (s *Server) PR(repo string, number int) Item {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	it := s.mustRepo(repo).item(itoa(number), true)
+	if it == nil {
+		panic(fmt.Sprintf("forgeconntest: %s holds no pull request %d", repo, number))
+	}
+	out := *it
+	out.Labels = append([]string(nil), it.Labels...)
+	return out
+}
+
 // SetChecks sets the states of the checks on commit sha of repo.
 func (s *Server) SetChecks(repo, sha string, states ...string) {
 	s.mu.Lock()
@@ -563,6 +577,26 @@ func runsHighestIDFirst(repo *Repo, bound time.Time) []Run {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID > out[j].ID })
 	return out
+}
+
+// restRoute is a GitHub or Gitea repository route's pattern, the item
+// number, label, run id and commit segments standing as {n}, {name}, {id}
+// and {sha}, with those values in path order.
+func restRoute(method string, parts []string) (pattern string, args []string) {
+	shape := append([]string(nil), parts...)
+	if len(shape) >= 2 && (shape[0] == "issues" || shape[0] == "pulls" || shape[0] == "commits") {
+		shape[1], args = "{n}", append(args, parts[1])
+		if shape[0] == "commits" {
+			shape[1] = "{sha}"
+		}
+	}
+	if len(shape) == 4 && shape[0] == "issues" && shape[2] == "labels" {
+		shape[3], args = "{name}", append(args, parts[3])
+	}
+	if len(shape) >= 3 && shape[0] == "actions" && shape[1] == "runs" {
+		shape[2], args = "{id}", append(args, parts[2])
+	}
+	return method + " " + strings.Join(shape, "/"), args
 }
 
 // labelObjects is names as label objects, each in one colour.
