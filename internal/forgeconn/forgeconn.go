@@ -19,8 +19,8 @@ import (
 	"github.com/cplieger/forge-scout/internal/forge"
 	"github.com/cplieger/forge-scout/internal/ghquota"
 	"github.com/cplieger/forge-scout/internal/spend"
-	"github.com/cplieger/forgeapi/v2"
-	"github.com/cplieger/forgeapi/v2/families"
+	"github.com/cplieger/forgeapi/v3"
+	"github.com/cplieger/forgeapi/v3/families"
 )
 
 // Walk ceilings, in pages: each list call reads one page. Reaching one with a
