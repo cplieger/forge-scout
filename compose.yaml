@@ -6,8 +6,21 @@ services:
     restart: unless-stopped
     # Must own the ./data host folder. If .env sets PUID and PGID, those numbers are used.
     user: "${PUID:-1000}:${PGID:-1000}"
+    # forge-scout writes only under /data, so the rest stays read-only.
+    read_only: true
+
+    environment:
+      # Host names the two ports answer besides localhost, separated by commas: the name
+      # your browser uses, and the container name a Prometheus scraper uses.
+      ALLOWED_HOSTS: "forge-scout,scout.example.com"
+
+    ports:
+      # The web page. Neither port asks for a sign-in yet: publish them only to a network you trust.
+      - "7466:7466"
+      # /healthz and /metrics only. Leave it unpublished when the scraper shares a Docker network.
+      - "7467:7467"
 
     volumes:
-      # forge-scout's data. Run "mkdir -p data && sudo chown 1000:1000 data" before the first start.
-      # If .env sets PUID and PGID, use those numbers.
+      # forge-scout's data file and its admin socket. Run "mkdir -p data && sudo chown 1000:1000 data"
+      # before the first start. If .env sets PUID and PGID, use those numbers.
       - "./data:/data"
