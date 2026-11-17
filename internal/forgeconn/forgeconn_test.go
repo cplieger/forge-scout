@@ -11,7 +11,7 @@ import (
 	"github.com/cplieger/forge-scout/internal/forge"
 	"github.com/cplieger/forge-scout/internal/ghquota"
 	"github.com/cplieger/forge-scout/internal/spend"
-	"github.com/cplieger/forgeapi/v2"
+	"github.com/cplieger/forgeapi/v3"
 )
 
 // fakeAPI answers the reads the adapter makes from function fields; an
@@ -469,7 +469,7 @@ func TestOpenPRs_maps_rows(t *testing.T) {
 	}
 }
 
-func TestOpenPRs_and_RepoOpenPRs_leave_merge_state_unread(t *testing.T) {
+func TestOpenPRs_and_RepoOpenPRs_leave_merge_state_and_reviews_unread(t *testing.T) {
 	var mine, listed forgeapi.ListSettings
 	f := &fakeAPI{
 		myPRs: func(opts ...forgeapi.ListOption) (forgeapi.Page[forgeapi.PullRequest], error) {
@@ -493,6 +493,12 @@ func TestOpenPRs_and_RepoOpenPRs_leave_merge_state_unread(t *testing.T) {
 	}
 	if !listed.MergeStateSet || listed.MergeState {
 		t.Errorf("RepoOpenPRs sent merge state %t (set %t), want false, set", listed.MergeState, listed.MergeStateSet)
+	}
+	if !mine.ReviewsSet || mine.Reviews {
+		t.Errorf("OpenPRs sent reviews %t (set %t), want false, set", mine.Reviews, mine.ReviewsSet)
+	}
+	if !listed.ReviewsSet || listed.Reviews {
+		t.Errorf("RepoOpenPRs sent reviews %t (set %t), want false, set", listed.Reviews, listed.ReviewsSet)
 	}
 }
 
