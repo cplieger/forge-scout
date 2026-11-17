@@ -15,10 +15,28 @@ import (
 // the nil embedded interface.
 type stub struct {
 	api
-	caps   forgeapi.ConnectionCaps
-	budget forgeapi.BudgetState
-	pr     forgeapi.PullRequest
-	issue  forgeapi.Issue
+	caps    forgeapi.ConnectionCaps
+	budget  forgeapi.BudgetState
+	pr      forgeapi.PullRequest
+	issue   forgeapi.Issue
+	targets []forgeapi.LabelTarget
+	merges  []forgeapi.MergeRequest
+	outcome forgeapi.MergeOutcome
+}
+
+func (s *stub) AddLabels(_ context.Context, _ forgeapi.RepoRef, target forgeapi.LabelTarget, _ []string) error {
+	s.targets = append(s.targets, target)
+	return nil
+}
+
+func (s *stub) RemoveLabels(_ context.Context, _ forgeapi.RepoRef, target forgeapi.LabelTarget, _ []string) error {
+	s.targets = append(s.targets, target)
+	return nil
+}
+
+func (s *stub) MergePR(_ context.Context, _ forgeapi.RepoRef, _ forgeapi.PRRef, req forgeapi.MergeRequest) (forgeapi.MergeOutcome, error) {
+	s.merges = append(s.merges, req)
+	return s.outcome, nil
 }
 
 func (s *stub) ConnectionCaps(context.Context) (forgeapi.ConnectionCaps, error) { return s.caps, nil }
@@ -229,5 +247,66 @@ func TestBudget_an_unreported_remaining_is_count_unknown(t *testing.T) {
 	want := forge.Budget{Remaining: forge.CountUnknown, Reset: reset, LastCost: 2, Cache: forge.ReadCache{Hits: 3, Misses: 4, Saved: 5}}
 	if got := c.Budget(); got != want {
 		t.Errorf("Budget = %+v, want %+v", got, want)
+	}
+}
+
+func TestLabels_address_the_item_of_the_kind_named(t *testing.T) {
+	s := &stub{}
+	c := client(s)
+	key := forge.ItemKey{Connection: "c1", Repo: appRef.ID, Number: 7}
+	if err := c.AddLabels(t.Context(), key, forge.KindPullRequest, []string{"a"}); err != nil {
+		t.Fatalf("AddLabels: %v", err)
+	}
+	if err := c.RemoveLabels(t.Context(), key, forge.KindIssue, []string{"a"}); err != nil {
+		t.Fatalf("RemoveLabels: %v", err)
+	}
+	want := []forgeapi.LabelTarget{{PR: forgeapi.PRRef{Number: 7}}, {Issue: forgeapi.IssueRef{Number: 7}}}
+	if len(s.targets) != 2 || s.targets[0] != want[0] || s.targets[1] != want[1] {
+		t.Errorf("targets = %+v, want %+v", s.targets, want)
+	}
+}
+
+func TestMerge_sends_the_strategy_or_the_repository_default_and_never_deletes_the_branch(t *testing.T) {
+	s := &stub{}
+	c := client(s)
+	key := forge.ItemKey{Connection: "c1", Repo: appRef.ID, Number: 7}
+	for _, req := range []MergeRequest{{HeadSHA: "abc"}, {Strategy: "squash", HeadSHA: "abc", AutoMerge: true}} {
+		if _, err := c.Merge(t.Context(), key, req); err != nil {
+			t.Fatalf("Merge: %v", err)
+		}
+	}
+	want := []forgeapi.MergeRequest{
+		{Intent: forgeapi.IntentDefault, HeadSHA: "abc"},
+		{Intent: forgeapi.IntentDefault, Strategy: "squash", HeadSHA: "abc", AutoMerge: true},
+	}
+	if len(s.merges) != 2 || s.merges[0] != want[0] || s.merges[1] != want[1] {
+		t.Errorf("merge requests = %+v, want %+v", s.merges, want)
+	}
+}
+
+func TestMerge_maps_each_outcome(t *testing.T) {
+	tests := []struct {
+		in   forgeapi.MergeOutcomeState
+		want forge.MergeOutcomeState
+	}{
+		{forgeapi.MergeOutcomeMerged, forge.MergeOutcomeMerged},
+		{forgeapi.MergeOutcomeEnqueued, forge.MergeOutcomeEnqueued},
+		{forgeapi.MergeOutcomeAccepted, forge.MergeOutcomeAccepted},
+		{forgeapi.MergeOutcomeInFlight, forge.MergeOutcomeInFlight},
+		{forgeapi.MergeOutcomeRefused, forge.MergeOutcomeRefused},
+		{forgeapi.MergeOutcomeUnknown, forge.MergeOutcomeUnknown},
+	}
+	for _, tc := range tests {
+		t.Run(string(tc.want), func(t *testing.T) {
+			s := &stub{outcome: forgeapi.MergeOutcome{State: tc.in, Code: "code", QueueState: forgeapi.QueueQueued, QueuePosition: 3}}
+			out, err := client(s).Merge(t.Context(), forge.ItemKey{Connection: "c1", Repo: appRef.ID, Number: 7}, MergeRequest{HeadSHA: "abc"})
+			if err != nil {
+				t.Fatalf("Merge: %v", err)
+			}
+			want := forge.MergeOutcome{State: tc.want, Code: "code", Queue: forge.QueueQueued, QueuePosition: 3}
+			if out != want {
+				t.Errorf("Merge = %+v, want %+v", out, want)
+			}
+		})
 	}
 }

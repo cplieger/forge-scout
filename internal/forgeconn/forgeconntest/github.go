@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -49,6 +50,7 @@ type Workflow struct {
 func (s *Server) serveGitHub(w http.ResponseWriter, r *http.Request) bool {
 	h := w.Header()
 	h.Set("X-GitHub-Request-Id", "FAKE:REQUEST")
+	h.Set("X-GitHub-Api-Version-Selected", cmp.Or(r.Header.Get("X-GitHub-Api-Version"), "2022-11-28"))
 	h.Set("X-RateLimit-Limit", "5000")
 	remaining, reset := s.budget()
 	h.Set("X-RateLimit-Remaining", itoa(remaining))
@@ -58,56 +60,88 @@ func (s *Server) serveGitHub(w http.ResponseWriter, r *http.Request) bool {
 		return s.serveGitHubGraphQL(w, r)
 	}
 	h.Set("X-RateLimit-Resource", "core")
-	if r.Method != http.MethodGet || !strings.HasPrefix(r.URL.Path, ghREST+"/") {
+	if !strings.HasPrefix(r.URL.Path, ghREST+"/") {
 		return false
 	}
 	path := strings.TrimPrefix(r.URL.Path, ghREST)
-	switch path {
-	case "/meta":
-		writeJSON(w, http.StatusOK, map[string]any{"installed_version": "3.20.0", "verifiable_password_authentication": false})
-		return true
-	case "/versions":
-		writeJSON(w, http.StatusOK, []string{"2026-03-10", "2022-11-28"})
-		return true
-	case "/user":
-		h.Set("X-OAuth-Scopes", "repo, workflow")
-		writeJSON(w, http.StatusOK, map[string]any{"login": s.world.Login, "name": s.world.Login, "html_url": webURL(s.URL, s.world.Login)})
-		return true
+	if r.Method == http.MethodGet {
+		switch path {
+		case "/meta":
+			writeJSON(w, http.StatusOK, map[string]any{"installed_version": "3.20.0", "verifiable_password_authentication": false})
+			return true
+		case "/versions":
+			writeJSON(w, http.StatusOK, []string{"2026-03-10", "2022-11-28"})
+			return true
+		case "/user":
+			h.Set("X-OAuth-Scopes", "repo, workflow")
+			writeJSON(w, http.StatusOK, map[string]any{"login": s.world.Login, "name": s.world.Login, "html_url": webURL(s.URL, s.world.Login)})
+			return true
+		}
 	}
-	parts := strings.Split(strings.TrimPrefix(path, "/repos/"), "/")
-	if !strings.HasPrefix(path, "/repos/") || len(parts) < 2 || !strings.EqualFold(parts[0], s.world.Owner) {
+	parts, ok := segments(strings.TrimPrefix(r.URL.EscapedPath(), ghREST+"/repos/"))
+	if !strings.HasPrefix(path, "/repos/") || !ok || len(parts) < 2 || !strings.EqualFold(parts[0], s.world.Owner) {
 		return false
 	}
 	repo, ok := s.repo(parts[1])
 	if !ok {
 		return false
 	}
-	return s.githubRepoRoute(w, r, repo, strings.Join(parts[2:], "/"))
+	return s.githubRepoRoute(w, r, repo, parts[2:])
+}
+
+// segments splits an escaped path into its unescaped segments, so a label
+// name holding a slash stays one segment.
+func segments(escaped string) ([]string, bool) {
+	parts := strings.Split(escaped, "/")
+	for i, p := range parts {
+		u, err := url.PathUnescape(p)
+		if err != nil {
+			return nil, false
+		}
+		parts[i] = u
+	}
+	return parts, true
+}
+
+// githubRoute is a repository route's pattern, the item number, run id or
+// label name segments standing as {n}, {id} and {name}, with those values.
+func githubRoute(method string, parts []string) (pattern string, args []string) {
+	shape := append([]string(nil), parts...)
+	if len(shape) >= 2 && (shape[0] == "issues" || shape[0] == "pulls") {
+		shape[1], args = "{n}", append(args, parts[1])
+	}
+	if len(shape) == 4 && shape[0] == "issues" && shape[2] == "labels" {
+		shape[3], args = "{name}", append(args, parts[3])
+	}
+	if len(shape) >= 3 && shape[0] == "actions" && shape[1] == "runs" {
+		shape[2], args = "{id}", append(args, parts[2])
+	}
+	return method + " " + strings.Join(shape, "/"), args
 }
 
 // githubRepoRoute answers one repository route, reporting whether it serves
 // it.
-func (s *Server) githubRepoRoute(w http.ResponseWriter, r *http.Request, repo *Repo, route string) bool {
-	if n, ok := strings.CutPrefix(route, "issues/"); ok {
-		return s.githubIssue(w, repo, n)
-	}
-	switch route {
-	case "":
+func (s *Server) githubRepoRoute(w http.ResponseWriter, r *http.Request, repo *Repo, parts []string) bool {
+	pattern, args := githubRoute(r.Method, parts)
+	switch pattern {
+	case "GET ":
 		s.githubRepoRecord(w, repo)
-	case "actions/runs":
+	case "GET issues/{n}":
+		return s.githubIssue(w, repo, args[0])
+	case "GET actions/runs":
 		if repo.RunsForbidden {
 			writeJSON(w, http.StatusForbidden, map[string]any{"message": "Resource not accessible by personal access token"})
 			return true
 		}
 		s.githubRuns(w, r, repo)
-	case "actions/workflows":
+	case "GET actions/workflows":
 		s.githubWorkflows(w, r, repo)
-	case "code-scanning/alerts":
+	case "GET code-scanning/alerts":
 		s.githubAlerts(w, r, repo)
-	case "labels":
+	case "GET labels":
 		s.githubLabels(w, r, repo)
 	default:
-		return false
+		return s.githubWriteRoute(w, r, repo, pattern, args)
 	}
 	return true
 }
@@ -126,37 +160,61 @@ func (s *Server) githubRepoRecord(w http.ResponseWriter, repo *Repo) {
 // githubIssue answers the REST record of issue n, which on GitHub may be a
 // pull request.
 func (s *Server) githubIssue(w http.ResponseWriter, repo *Repo, n string) bool {
+	it, pr := repo.issueOrPR(n)
+	if it == nil {
+		writeJSON(w, http.StatusNotFound, map[string]any{"message": "Not Found"})
+		return true
+	}
+	writeJSON(w, http.StatusOK, s.githubIssueRecord(repo, it, pr))
+	return true
+}
+
+// issueOrPR is issue or pull request n of the repository, and whether it is a
+// pull request; nil where it holds neither.
+func (r *Repo) issueOrPR(n string) (it *Item, pr bool) {
+	if it := r.item(n, false); it != nil {
+		return it, false
+	}
+	if it := r.item(n, true); it != nil {
+		return it, true
+	}
+	return nil, false
+}
+
+// item is pull request n of the repository, or its issue n; nil where there
+// is none.
+func (r *Repo) item(n string, pr bool) *Item {
 	number, err := strconv.Atoi(n)
 	if err != nil {
-		return false
+		return nil
 	}
-	for _, list := range []struct {
-		items []Item
-		pr    bool
-	}{{repo.Issues, false}, {repo.PRs, true}} {
-		for i := range list.items {
-			it := &list.items[i]
-			if it.Number != number {
-				continue
-			}
-			state := "open"
-			if !it.open() {
-				state = "closed"
-			}
-			row := map[string]any{
-				"number": it.Number, "state": state, "title": it.Title, "body": it.Body,
-				"user": map[string]any{"login": it.Author, "type": cmp.Or(it.AuthorType, "User")}, "html_url": webURL(s.URL, s.fullName(repo)+"/issues/"+n),
-				"created_at": stamp(it.Created), "updated_at": stamp(it.Updated), "labels": labelObjects(it.Labels), "comments": it.Comments,
-			}
-			if list.pr {
-				row["pull_request"] = map[string]any{"url": webURL(s.URL, s.fullName(repo)+"/pull/"+n)}
-			}
-			writeJSON(w, http.StatusOK, row)
-			return true
+	items := r.Issues
+	if pr {
+		items = r.PRs
+	}
+	for i := range items {
+		if items[i].Number == number {
+			return &items[i]
 		}
 	}
-	writeJSON(w, http.StatusNotFound, map[string]any{"message": "Not Found"})
-	return true
+	return nil
+}
+
+func (s *Server) githubIssueRecord(repo *Repo, it *Item, pr bool) map[string]any {
+	n := itoa(it.Number)
+	state := "open"
+	if !it.open() {
+		state = "closed"
+	}
+	row := map[string]any{
+		"number": it.Number, "state": state, "title": it.Title, "body": it.Body,
+		"user": map[string]any{"login": it.Author, "type": cmp.Or(it.AuthorType, "User")}, "html_url": webURL(s.URL, s.fullName(repo)+"/issues/"+n),
+		"created_at": stamp(it.Created), "updated_at": stamp(it.Updated), "labels": labelObjects(it.Labels), "comments": it.Comments,
+	}
+	if pr {
+		row["pull_request"] = map[string]any{"url": webURL(s.URL, s.fullName(repo)+"/pull/"+n)}
+	}
+	return row
 }
 
 // restPage is the rows of a page-numbered REST list request, with GitHub's
@@ -210,10 +268,11 @@ func createdRange(raw string) (from, to time.Time) {
 
 func (s *Server) githubRuns(w http.ResponseWriter, r *http.Request, repo *Repo) {
 	from, to := createdRange(r.URL.Query().Get("created"))
+	head := r.URL.Query().Get("head_sha")
 	all := runsHighestIDFirst(repo, from)
 	runs := all[:0:0]
 	for i := range all {
-		if to.IsZero() || !all[i].Created.Truncate(time.Second).After(to) {
+		if (to.IsZero() || !all[i].Created.Truncate(time.Second).After(to)) && (head == "" || all[i].HeadSHA == head) {
 			runs = append(runs, all[i])
 		}
 	}
@@ -295,11 +354,15 @@ func (s *Server) serveGitHubGraphQL(w http.ResponseWriter, r *http.Request) bool
 	if err := json.Unmarshal(body, &req); err != nil {
 		return false
 	}
+	q := docQuery{vars: req.Variables}
+	if mutation, ok := s.githubMutation(req.OperationName, &q); ok {
+		writeJSON(w, http.StatusOK, mutation)
+		return true
+	}
 	remaining, reset := s.budget()
 	data := map[string]any{"rateLimit": map[string]any{
 		"cost": s.cost, "limit": 5000, "nodeCount": 0, "remaining": remaining, "resetAt": stamp(reset), "used": 5000 - remaining,
 	}}
-	q := docQuery{vars: req.Variables}
 	var errs []map[string]any
 	switch req.OperationName {
 	case "RepoOwned":
