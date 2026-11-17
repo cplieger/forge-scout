@@ -201,7 +201,9 @@ type Run struct {
 
 // Label is one label a repository defines.
 type Label struct {
-	Name  string
+	Name string
+	// Color is #rrggbb in lower case, empty where the forge named no hex
+	// colour.
 	Color string
 }
 

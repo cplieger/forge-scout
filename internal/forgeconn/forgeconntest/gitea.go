@@ -67,6 +67,9 @@ func (s *Server) giteaRepoRoute(w http.ResponseWriter, r *http.Request) bool {
 }
 
 func (s *Server) giteaVersion() string {
+	if s.world.Version != "" {
+		return s.world.Version
+	}
 	if s.product == Forgejo {
 		return "16.0.0+gitea-1.22.0"
 	}

@@ -3,6 +3,7 @@ package forgeconn
 import (
 	"context"
 	"net/http"
+	"slices"
 
 	"github.com/cplieger/forge-scout/internal/forge"
 	"github.com/cplieger/forgeapi/v3"
@@ -32,15 +33,32 @@ func (c *Client) Merge(ctx context.Context, key forge.ItemKey, req MergeRequest)
 	if err != nil {
 		return forge.MergeOutcome{}, err
 	}
-	out, err := c.api.MergePR(ctx, ref, forgeapi.PRRef{Number: key.Number}, forgeapi.MergeRequest{
-		Intent: forgeapi.IntentDefault, Strategy: req.Strategy, HeadSHA: req.HeadSHA, AutoMerge: req.AutoMerge,
-	})
+	out, err := c.api.MergePR(ctx, ref, forgeapi.PRRef{Number: key.Number}, c.mergeRequestOf(&req))
 	if err != nil {
 		return forge.MergeOutcome{}, mapErr(err)
 	}
 	return forge.MergeOutcome{
 		State: mergeOutcomeOf(out.State), Code: out.Code, Queue: queueOf(out.QueueState), QueuePosition: out.QueuePosition,
 	}, nil
+}
+
+// gitlabMergeMethods are the strategies a GitLab project's Affordances can
+// list: its merge method (https://docs.gitlab.com/api/projects/#project-merge-method)
+// and squash.
+var gitlabMergeMethods = []string{"merge", "rebase_merge", "ff", "squash"}
+
+// mergeRequestOf is req as forgeapi takes it. GitLab's merge takes no
+// strategy: it merges by the project's own method, and squash is forgeapi's
+// squash intent there, so a listed strategy is never sent as one.
+func (c *Client) mergeRequestOf(req *MergeRequest) forgeapi.MergeRequest {
+	out := forgeapi.MergeRequest{Intent: forgeapi.IntentDefault, Strategy: req.Strategy, HeadSHA: req.HeadSHA, AutoMerge: req.AutoMerge}
+	if c.product == forge.ProductGitLab && slices.Contains(gitlabMergeMethods, req.Strategy) {
+		if req.Strategy == "squash" {
+			out.Intent = forgeapi.IntentSquash
+		}
+		out.Strategy = ""
+	}
+	return out
 }
 
 // CancelAutoMerge disarms a pull request's armed merge. A pull request with
@@ -98,9 +116,10 @@ func (c *Client) RemoveLabels(ctx context.Context, key forge.ItemKey, kind forge
 }
 
 // RerunFailedChecks re-runs the failed checks of a pull request's head
-// commit head, empty for the head it carries now. A pinned head no run
-// carries is a conflict with the code stale_head; any other head with no
-// failed or cancelled run, one with the code run_not_failed.
+// commit head, empty for the head it carries now. A head with no failed or
+// cancelled run is a conflict with the code run_not_failed. A conflict with
+// the code stale_head is, on GitLab, a pin that is no longer the merge
+// request's head and, on GitHub, Gitea and Forgejo, a pin no run carries.
 func (c *Client) RerunFailedChecks(ctx context.Context, key forge.ItemKey, head string) error {
 	return c.onPR(ctx, key, func(ctx context.Context, repo forgeapi.RepoRef, pr forgeapi.PRRef) error {
 		return c.api.RerunFailedChecks(ctx, repo, pr, head)

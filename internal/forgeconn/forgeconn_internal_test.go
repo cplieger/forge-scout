@@ -169,24 +169,27 @@ func TestHeadOf_reads_the_half_unless_a_marker_or_the_list_says_otherwise(t *tes
 	tests := []struct {
 		name     string
 		partial  *forgeapi.Partial
+		product  forge.Product
+		checks   forge.CheckState
 		action   forgeapi.ActionState
 		headRead bool
 		read     bool
 		refused  bool
-		checks   forge.CheckState
 	}{
-		{"whole", nil, passing, true, true, false, forge.CheckPassing},
-		{"cut_names", &forgeapi.Partial{Reason: forgeapi.PartialPaginationCap}, passing, true, true, false, forge.CheckPassing},
-		{"refused_rollup", &forgeapi.Partial{Reason: forgeapi.PartialForbidden}, forgeapi.ActionState{}, true, true, true, forge.CheckUnknown},
-		{"no_check", nil, forgeapi.ActionState{}, true, true, false, forge.CheckNone},
-		{"graphql_partial", &forgeapi.Partial{Reason: forgeapi.PartialGraphQLPartial}, passing, true, false, false, ""},
-		{"fold_deferred", &forgeapi.Partial{Reason: forgeapi.PartialRateLimited}, passing, true, false, false, ""},
-		{"fold_unfinished", &forgeapi.Partial{Reason: forgeapi.PartialBudget}, passing, true, false, false, ""},
-		{"list_without_head", nil, passing, false, false, false, ""},
+		{"whole", nil, forge.ProductGitHub, forge.CheckPassing, passing, true, true, false},
+		{"cut_names", &forgeapi.Partial{Reason: forgeapi.PartialPaginationCap}, forge.ProductGitHub, forge.CheckPassing, passing, true, true, false},
+		{"refused_rollup", &forgeapi.Partial{Reason: forgeapi.PartialForbidden}, forge.ProductGitHub, forge.CheckUnknown, forgeapi.ActionState{}, true, true, true},
+		{"no_check", nil, forge.ProductGitHub, forge.CheckNone, forgeapi.ActionState{}, true, true, false},
+		{"no_count_on_gitlab", nil, forge.ProductGitLab, forge.CheckUnknown, forgeapi.ActionState{}, true, true, false},
+		{"pipeline_on_gitlab", nil, forge.ProductGitLab, forge.CheckFailing, forgeapi.ActionState{Checks: forgeapi.CheckFailing}, true, true, false},
+		{"graphql_partial", &forgeapi.Partial{Reason: forgeapi.PartialGraphQLPartial}, forge.ProductGitHub, "", passing, true, false, false},
+		{"fold_deferred", &forgeapi.Partial{Reason: forgeapi.PartialRateLimited}, forge.ProductGitHub, "", passing, true, false, false},
+		{"fold_unfinished", &forgeapi.Partial{Reason: forgeapi.PartialBudget}, forge.ProductGitHub, "", passing, true, false, false},
+		{"list_without_head", nil, forge.ProductGitLab, "", passing, false, false, false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			h := headOf(&forgeapi.PullRequest{HeadSHA: "abc", Partial: tc.partial, Action: tc.action}, tc.headRead)
+			h := headOf(&forgeapi.PullRequest{HeadSHA: "abc", Partial: tc.partial, Action: tc.action}, tc.headRead, tc.product)
 			if h.Read != tc.read || h.ChecksRefused != tc.refused || h.Checks != tc.checks {
 				t.Errorf("head = %+v, want read %v, refused %v, checks %q", h, tc.read, tc.refused, tc.checks)
 			}
@@ -266,21 +269,54 @@ func TestLabels_address_the_item_of_the_kind_named(t *testing.T) {
 	}
 }
 
-func TestMerge_sends_the_strategy_or_the_repository_default_and_never_deletes_the_branch(t *testing.T) {
-	s := &stub{}
-	c := client(s)
-	key := forge.ItemKey{Connection: "c1", Repo: appRef.ID, Number: 7}
-	for _, req := range []MergeRequest{{HeadSHA: "abc"}, {Strategy: "squash", HeadSHA: "abc", AutoMerge: true}} {
-		if _, err := c.Merge(t.Context(), key, req); err != nil {
-			t.Fatalf("Merge: %v", err)
-		}
+func TestMerge_sends_a_strategy_as_the_product_takes_it_and_never_deletes_the_branch(t *testing.T) {
+	tests := []struct {
+		name    string
+		product forge.Product
+		req     MergeRequest
+		want    forgeapi.MergeRequest
+	}{
+		{"default", forge.ProductGitHub, MergeRequest{HeadSHA: "abc"}, forgeapi.MergeRequest{Intent: forgeapi.IntentDefault, HeadSHA: "abc"}},
+		{
+			"strategy", forge.ProductGitHub,
+			MergeRequest{Strategy: "squash", HeadSHA: "abc", AutoMerge: true},
+			forgeapi.MergeRequest{Intent: forgeapi.IntentDefault, Strategy: "squash", HeadSHA: "abc", AutoMerge: true},
+		},
+		{"gitlab_squash", forge.ProductGitLab, MergeRequest{Strategy: "squash", HeadSHA: "abc"}, forgeapi.MergeRequest{Intent: forgeapi.IntentSquash, HeadSHA: "abc"}},
+		{"gitlab_merge_method", forge.ProductGitLab, MergeRequest{Strategy: "rebase_merge", HeadSHA: "abc"}, forgeapi.MergeRequest{Intent: forgeapi.IntentDefault, HeadSHA: "abc"}},
+		{"gitlab_unlisted", forge.ProductGitLab, MergeRequest{Strategy: "rebase", HeadSHA: "abc"}, forgeapi.MergeRequest{Intent: forgeapi.IntentDefault, Strategy: "rebase", HeadSHA: "abc"}},
 	}
-	want := []forgeapi.MergeRequest{
-		{Intent: forgeapi.IntentDefault, HeadSHA: "abc"},
-		{Intent: forgeapi.IntentDefault, Strategy: "squash", HeadSHA: "abc", AutoMerge: true},
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &stub{}
+			c := client(s)
+			c.product = tc.product
+			if _, err := c.Merge(t.Context(), forge.ItemKey{Connection: "c1", Repo: appRef.ID, Number: 7}, tc.req); err != nil {
+				t.Fatalf("Merge: %v", err)
+			}
+			if len(s.merges) != 1 || s.merges[0] != tc.want {
+				t.Errorf("merge requests = %+v, want %+v", s.merges, tc.want)
+			}
+		})
 	}
-	if len(s.merges) != 2 || s.merges[0] != want[0] || s.merges[1] != want[1] {
-		t.Errorf("merge requests = %+v, want %+v", s.merges, want)
+}
+
+func TestColorOf_spells_every_hex_colour_one_way(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"ededed", "#ededed"},
+		{"#EDEDED", "#ededed"},
+		{"#f0a", "#ff00aa"},
+		{"f0a", "#ff00aa"},
+		{"#ededed0", ""},
+		{"red", ""},
+		{"#gggggg", ""},
+		{"", ""},
+	} {
+		t.Run(tc.in, func(t *testing.T) {
+			if got := colorOf(tc.in); got != tc.want {
+				t.Errorf("colorOf(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
 	}
 }
 

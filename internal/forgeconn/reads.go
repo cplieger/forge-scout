@@ -23,7 +23,8 @@ func (c *Client) Repos(ctx context.Context, owner string) (forge.Listing[forge.R
 
 // MyPRs lists the open pull requests under owner across its repositories,
 // with merge state and reviews. On GitLab, Gitea and Forgejo the rows carry
-// no head-keyed half: Head is not read.
+// no head-keyed half: Head is not read. GitLab lists across a group's
+// projects only: a user owner is not_found with the code owner_unresolved.
 func (c *Client) MyPRs(ctx context.Context, owner string) (forge.Listing[forge.PullRequest], error) {
 	w, err := walk(ctx, c, maxSnapshotPages, func(ctx context.Context, after forgeapi.Cursor) (forgeapi.Page[forgeapi.PullRequest], error) {
 		return c.api.ListMyPRs(ctx, forgeapi.WithOwner(owner), forgeapi.WithMergeState(true), forgeapi.WithReviews(true), forgeapi.WithAfter(after))
@@ -35,7 +36,9 @@ func (c *Client) MyPRs(ctx context.Context, owner string) (forge.Listing[forge.P
 	return listing(&w, func(r *forgeapi.PullRequest) (forge.PullRequest, bool) { return c.prOf(r, headRead) }), nil
 }
 
-// MyIssues lists the open issues under owner across its repositories.
+// MyIssues lists the open issues under owner across its repositories. As
+// with MyPRs, a GitLab user owner is not_found with the code
+// owner_unresolved.
 func (c *Client) MyIssues(ctx context.Context, owner string) (forge.Listing[forge.Issue], error) {
 	w, err := walk(ctx, c, maxSnapshotPages, func(ctx context.Context, after forgeapi.Cursor) (forgeapi.Page[forgeapi.Issue], error) {
 		return c.api.ListMyIssues(ctx, forgeapi.WithOwner(owner), forgeapi.WithAfter(after))

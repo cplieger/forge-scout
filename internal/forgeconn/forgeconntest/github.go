@@ -12,12 +12,9 @@ import (
 	"time"
 )
 
-// GitHub Enterprise Server's layout, which forgeapi takes for a loopback
-// instance: REST under /api/v3 and GraphQL at /api/graphql.
-const (
-	ghREST    = "/api/v3"
-	ghGraphQL = "/api/graphql"
-)
+// GitHub Enterprise Server's REST root, which forgeapi takes for a loopback
+// instance; its GraphQL endpoint is graphQLPath.
+const ghREST = "/api/v3"
 
 // The contexts page each GitHub document asks for: a list folds over one
 // context and the per-state counts, a single read over every context.
@@ -55,7 +52,7 @@ func (s *Server) serveGitHub(w http.ResponseWriter, r *http.Request) bool {
 	remaining, reset := s.budget()
 	h.Set("X-RateLimit-Remaining", itoa(remaining))
 	h.Set("X-RateLimit-Reset", itoa(int(reset.Unix())))
-	if r.Method == http.MethodPost && r.URL.Path == ghGraphQL {
+	if r.Method == http.MethodPost && r.URL.Path == graphQLPath {
 		h.Set("X-RateLimit-Resource", "graphql")
 		return s.serveGitHubGraphQL(w, r)
 	}

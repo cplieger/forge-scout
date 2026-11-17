@@ -44,90 +44,159 @@ func readIssue(t *testing.T, c *forgeconn.Client, n int) forge.Issue {
 	return is
 }
 
-// mergeable makes pull request #2, whose head has a failing and a running
-// check, a ready non-draft pull request with no conflict and nothing armed.
+// mergeable makes pull request #2, whose head has failing checks, a ready
+// non-draft pull request with no conflict and nothing armed.
 func mergeable(srv *forgeconntest.Server) {
 	srv.EditPR("app", 2, false, func(it *forgeconntest.Item) { it.Draft, it.Conflicting, it.AutoMerge = false, false, false })
 }
 
-func TestMerge_merges_a_pull_request_that_can_merge_at_its_head(t *testing.T) {
-	t.Parallel()
-	srv, c := open(t, world())
-	out, err := c.Merge(t.Context(), appItem(1), forgeconn.MergeRequest{HeadSHA: passed})
-	if err != nil {
-		t.Fatalf("Merge: %v", err)
-	}
-	want := forge.MergeOutcome{State: forge.MergeOutcomeAccepted, Code: forgeapi.CodeAlreadyEnqueued, Queue: forge.QueueUnknown, QueuePosition: forge.CountUnknown}
-	if out != want {
-		t.Errorf("Merge = %+v, want %+v: GitHub merges in the background and the answer has no verdict", out, want)
-	}
-	s, err := c.MergeStatus(t.Context(), appItem(1))
-	if err != nil || s.Merged != forge.SupportYes {
-		t.Errorf("MergeStatus after the merge = %+v, %v, want merged", s, err)
-	}
-	if pr := readPR(t, c, 1); pr.State != forge.ItemMerged {
-		t.Errorf("ReadPR after the merge = state %q, want merged", pr.State)
-	}
-	handledAll(t, srv)
-}
-
-func TestMerge_a_refused_merge_leaves_the_pull_request_open(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name   string
-		number int
-		req    forgeconn.MergeRequest
-		kind   forge.ErrorKind
-		code   string
-		status int
-		sent   bool
-	}{
-		{"head_moved", 1, forgeconn.MergeRequest{HeadSHA: failed}, forge.KindNotMergeable, forgeapi.CodeNotMergeable, http.StatusBadRequest, true},
-		{"strategy_turned_off", 1, forgeconn.MergeRequest{HeadSHA: passed, Strategy: "rebase"}, forge.KindNotMergeable, forgeapi.CodeNotMergeable, http.StatusMethodNotAllowed, true},
-		{"checks_failing", 2, forgeconn.MergeRequest{HeadSHA: failed}, forge.KindNotMergeable, forgeapi.CodeNotMergeable, http.StatusMethodNotAllowed, true},
-		{"strategy_unknown", 1, forgeconn.MergeRequest{HeadSHA: passed, Strategy: "fast-forward"}, forge.KindInvalid, forgeapi.CodeStrategyNotAllowed, 0, false},
-		{"no_head", 1, forgeconn.MergeRequest{}, forge.KindInvalid, forgeapi.CodeMissingSHA, 0, false},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			srv, c := open(t, world())
-			mergeable(srv)
-			sent := len(srv.Requests())
-			_, err := c.Merge(t.Context(), appItem(tc.number), tc.req)
-			if fe := wantErr(t, err, tc.kind, tc.code); fe.Status != tc.status {
-				t.Errorf("status = %d, want %d", fe.Status, tc.status)
-			}
-			if got := len(srv.Requests()) > sent; got != tc.sent {
-				t.Errorf("a request was sent = %v, want %v", got, tc.sent)
-			}
-			if pr := readPR(t, c, tc.number); pr.State != forge.ItemOpen {
-				t.Errorf("ReadPR after the refusal = state %q, want open", pr.State)
-			}
-			handledAll(t, srv)
-		})
-	}
-}
-
-func TestMerge_auto_merge_arms_a_pull_request_that_cannot_merge_now(t *testing.T) {
-	t.Parallel()
-	srv, c := open(t, world())
+// armable makes pull request #2 one whose merge can be armed and not made
+// now, and returns its head: GitHub arms a merge over failing checks, GitLab
+// only over a running pipeline.
+func armable(t *testing.T, p forgeconntest.Product, srv *forgeconntest.Server) string {
+	t.Helper()
 	mergeable(srv)
-	out, err := c.Merge(t.Context(), appItem(2), forgeconn.MergeRequest{HeadSHA: failed, AutoMerge: true})
-	if err != nil {
+	head := per(t, p, map[forgeconntest.Product]string{forgeconntest.GitHub: failed, forgeconntest.GitLab: running})
+	srv.PushHead("app", 2, head)
+	return head
+}
+
+// mergeCase is one merge the forge or forgeapi refuses.
+type mergeCase struct {
+	setup  func(*forgeconntest.Server)
+	req    forgeconn.MergeRequest
+	name   string
+	kind   forge.ErrorKind
+	code   string
+	number int
+	status int
+	sent   bool
+}
+
+func testMerge(t *testing.T, p forgeconntest.Product) {
+	t.Run("merges_at_its_head", func(t *testing.T) {
+		t.Parallel()
+		srv, c := open(t, p, world())
+		out, err := c.Merge(t.Context(), appItem(1), forgeconn.MergeRequest{HeadSHA: passed})
+		if err != nil {
+			t.Fatalf("Merge: %v", err)
+		}
+		// GitHub merges in the background and its answer has no verdict.
+		want := per(t, p, map[forgeconntest.Product]forge.MergeOutcome{
+			forgeconntest.GitHub: {State: forge.MergeOutcomeAccepted, Code: forgeapi.CodeAlreadyEnqueued, Queue: forge.QueueUnknown, QueuePosition: forge.CountUnknown},
+			forgeconntest.GitLab: {State: forge.MergeOutcomeMerged, Queue: forge.QueueNone, QueuePosition: forge.CountUnknown},
+		})
+		if out != want {
+			t.Errorf("Merge = %+v, want %+v", out, want)
+		}
+		s, err := c.MergeStatus(t.Context(), appItem(1))
+		if err != nil || s.Merged != forge.SupportYes {
+			t.Errorf("MergeStatus after the merge = %+v, %v, want merged", s, err)
+		}
+		if pr := readPR(t, c, 1); pr.State != forge.ItemMerged {
+			t.Errorf("ReadPR after the merge = state %q, want merged", pr.State)
+		}
+		handledAll(t, srv)
+	})
+	t.Run("refused", func(t *testing.T) {
+		t.Parallel()
+		local := []mergeCase{
+			{name: "strategy_unknown", number: 1, req: forgeconn.MergeRequest{HeadSHA: passed, Strategy: "fast-forward"}, kind: forge.KindInvalid, code: forgeapi.CodeStrategyNotAllowed},
+			{name: "no_head", number: 1, req: forgeconn.MergeRequest{}, kind: forge.KindInvalid, code: forgeapi.CodeMissingSHA},
+		}
+		// GitHub refuses a moved head 400 and a merge it cannot make 405;
+		// GitLab refuses one it can neither make nor arm 405, a draft or a
+		// conflict it could arm 422, and a moved head 409, in that order.
+		cases := append(local, per(t, p, map[forgeconntest.Product][]mergeCase{
+			forgeconntest.GitHub: {
+				{name: "head_moved", number: 1, req: forgeconn.MergeRequest{HeadSHA: failed}, kind: forge.KindNotMergeable, code: forgeapi.CodeNotMergeable, status: http.StatusBadRequest, sent: true},
+				{name: "strategy_turned_off", number: 1, req: forgeconn.MergeRequest{HeadSHA: passed, Strategy: "rebase"}, kind: forge.KindNotMergeable, code: forgeapi.CodeNotMergeable, status: http.StatusMethodNotAllowed, sent: true},
+				{name: "checks_failing", number: 2, req: forgeconn.MergeRequest{HeadSHA: failed}, kind: forge.KindNotMergeable, code: forgeapi.CodeNotMergeable, status: http.StatusMethodNotAllowed, sent: true},
+			},
+			forgeconntest.GitLab: {
+				{name: "head_moved", number: 1, req: forgeconn.MergeRequest{HeadSHA: failed}, kind: forge.KindConflict, code: forgeapi.CodeStaleHead, status: http.StatusConflict, sent: true},
+				{name: "strategy_not_listed", number: 1, req: forgeconn.MergeRequest{HeadSHA: passed, Strategy: "rebase"}, kind: forge.KindInvalid, code: forgeapi.CodeStrategyNotAllowed},
+				{name: "pipeline_failed", number: 2, req: forgeconn.MergeRequest{HeadSHA: failed}, kind: forge.KindNotMergeable, code: forgeapi.CodeNotMergeable, status: http.StatusMethodNotAllowed, sent: true},
+				{
+					name: "conflict_while_the_pipeline_runs", number: 2, req: forgeconn.MergeRequest{HeadSHA: running, AutoMerge: true},
+					setup: func(srv *forgeconntest.Server) {
+						srv.PushHead("app", 2, running)
+						srv.EditPR("app", 2, false, func(it *forgeconntest.Item) { it.Conflicting = true })
+					},
+					kind: forge.KindNotMergeable, code: forgeapi.CodeBranchCannotMerge, status: http.StatusUnprocessableEntity, sent: true,
+				},
+			},
+		})...)
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				srv, c := open(t, p, world())
+				mergeable(srv)
+				if tc.setup != nil {
+					tc.setup(srv)
+				}
+				sent := len(srv.Requests())
+				_, err := c.Merge(t.Context(), appItem(tc.number), tc.req)
+				if fe := wantErr(t, err, tc.kind, tc.code); fe.Status != tc.status {
+					t.Errorf("status = %d, want %d", fe.Status, tc.status)
+				}
+				if got := len(srv.Requests()) > sent; got != tc.sent {
+					t.Errorf("a request was sent = %v, want %v", got, tc.sent)
+				}
+				if pr := readPR(t, c, tc.number); pr.State != forge.ItemOpen || pr.Head.AutoMergeArmed != forge.SupportNo {
+					t.Errorf("ReadPR after the refusal = state %q armed %q, want open with nothing armed", pr.State, pr.Head.AutoMergeArmed)
+				}
+				handledAll(t, srv)
+			})
+		}
+	})
+	t.Run("auto_merge_arms_one_that_cannot_merge_now", func(t *testing.T) {
+		t.Parallel()
+		srv, c := open(t, p, world())
+		head := armable(t, p, srv)
+		out, err := c.Merge(t.Context(), appItem(2), forgeconn.MergeRequest{HeadSHA: head, AutoMerge: true})
+		if err != nil {
+			t.Fatalf("Merge: %v", err)
+		}
+		if out.State != forge.MergeOutcomeEnqueued || out.Code != "" {
+			t.Errorf("Merge = %+v, want enqueued with no code", out)
+		}
+		if pr := readPR(t, c, 2); pr.State != forge.ItemOpen || pr.Head.AutoMergeArmed != forge.SupportYes {
+			t.Errorf("ReadPR after arming = state %q armed %q, want open and armed", pr.State, pr.Head.AutoMergeArmed)
+		}
+		handledAll(t, srv)
+	})
+	t.Run("auto_merge_merges_one_that_can_merge_now", func(t *testing.T) {
+		t.Parallel()
+		srv, c := open(t, p, world())
+		out, err := c.Merge(t.Context(), appItem(1), forgeconn.MergeRequest{HeadSHA: passed, Strategy: "squash", AutoMerge: true})
+		if err != nil {
+			t.Fatalf("Merge: %v", err)
+		}
+		want := per(t, p, map[forgeconntest.Product]forge.MergeOutcomeState{
+			forgeconntest.GitHub: forge.MergeOutcomeAccepted, forgeconntest.GitLab: forge.MergeOutcomeMerged,
+		})
+		if out.State != want {
+			t.Errorf("Merge = %+v, want %q", out, want)
+		}
+		if pr := readPR(t, c, 1); pr.State != forge.ItemMerged {
+			t.Errorf("ReadPR = state %q, want merged", pr.State)
+		}
+		handledAll(t, srv)
+	})
+}
+
+func testCancelAutoMerge(t *testing.T, p forgeconntest.Product) {
+	srv, c := open(t, p, world())
+	head := armable(t, p, srv)
+	if _, err := c.Merge(t.Context(), appItem(2), forgeconn.MergeRequest{HeadSHA: head, AutoMerge: true}); err != nil {
 		t.Fatalf("Merge: %v", err)
-	}
-	if out.State != forge.MergeOutcomeEnqueued || out.Code != "" {
-		t.Errorf("Merge = %+v, want enqueued with no code", out)
-	}
-	pr := readPR(t, c, 2)
-	if pr.State != forge.ItemOpen || pr.Head.AutoMergeArmed != forge.SupportYes {
-		t.Errorf("ReadPR after arming = state %q armed %q, want open and armed", pr.State, pr.Head.AutoMergeArmed)
 	}
 	if err := c.CancelAutoMerge(t.Context(), appItem(2)); err != nil {
 		t.Fatalf("CancelAutoMerge: %v", err)
 	}
-	if pr := readPR(t, c, 2); pr.Head.AutoMergeArmed != forge.SupportNo {
-		t.Errorf("ReadPR after the cancel = armed %q, want no", pr.Head.AutoMergeArmed)
+	if pr := readPR(t, c, 2); pr.Head.AutoMergeArmed != forge.SupportNo || pr.State != forge.ItemOpen {
+		t.Errorf("ReadPR after the cancel = state %q armed %q, want open with nothing armed", pr.State, pr.Head.AutoMergeArmed)
 	}
 	if err := c.CancelAutoMerge(t.Context(), appItem(2)); err != nil {
 		t.Errorf("CancelAutoMerge with nothing armed = %v, want success", err)
@@ -135,30 +204,21 @@ func TestMerge_auto_merge_arms_a_pull_request_that_cannot_merge_now(t *testing.T
 	handledAll(t, srv)
 }
 
-func TestMerge_auto_merge_on_a_pull_request_that_can_merge_merges_it(t *testing.T) {
-	t.Parallel()
-	srv, c := open(t, world())
-	out, err := c.Merge(t.Context(), appItem(1), forgeconn.MergeRequest{HeadSHA: passed, Strategy: "squash", AutoMerge: true})
-	if err != nil {
-		t.Fatalf("Merge: %v", err)
-	}
-	if out.State != forge.MergeOutcomeAccepted {
-		t.Errorf("Merge = %+v, want the merge accepted", out)
-	}
-	if pr := readPR(t, c, 1); pr.State != forge.ItemMerged {
-		t.Errorf("ReadPR = state %q, want merged", pr.State)
-	}
-	handledAll(t, srv)
-}
-
-func TestClosePR_and_ReopenPR_move_the_pull_request(t *testing.T) {
-	t.Parallel()
-	srv, c := open(t, world())
+func testClosePR(t *testing.T, p forgeconntest.Product) {
+	srv, c := open(t, p, world())
 	if err := c.ClosePR(t.Context(), appItem(1)); err != nil {
 		t.Fatalf("ClosePR: %v", err)
 	}
 	if pr := readPR(t, c, 1); pr.State != forge.ItemClosed || !pr.UpdatedAt.After(t0.Add(time.Hour)) {
 		t.Errorf("ReadPR after closing = state %q updated %v, want closed with a newer updated time", pr.State, pr.UpdatedAt)
+	}
+	handledAll(t, srv)
+}
+
+func testReopenPR(t *testing.T, p forgeconntest.Product) {
+	srv, c := open(t, p, world())
+	if err := c.ClosePR(t.Context(), appItem(1)); err != nil {
+		t.Fatalf("ClosePR: %v", err)
 	}
 	if err := c.ReopenPR(t.Context(), appItem(1)); err != nil {
 		t.Fatalf("ReopenPR: %v", err)
@@ -166,22 +226,42 @@ func TestClosePR_and_ReopenPR_move_the_pull_request(t *testing.T) {
 	if pr := readPR(t, c, 1); pr.State != forge.ItemOpen {
 		t.Errorf("ReadPR after reopening = state %q, want open", pr.State)
 	}
-	fe := wantErr(t, c.ReopenPR(t.Context(), appItem(3)), forge.KindUpstream, forgeapi.CodeValidation)
-	if fe.Status != http.StatusUnprocessableEntity {
-		t.Errorf("ReopenPR of a merged pull request = status %d, want 422", fe.Status)
+	t.Run("merged", func(t *testing.T) {
+		// GitHub refuses the transition 422; GitLab's update ignores an event
+		// the state cannot take and answers 200.
+		err := c.ReopenPR(t.Context(), appItem(3))
+		switch p {
+		case forgeconntest.GitHub:
+			if fe := wantErr(t, err, forge.KindUpstream, forgeapi.CodeValidation); fe.Status != http.StatusUnprocessableEntity {
+				t.Errorf("ReopenPR of a merged pull request = status %d, want 422", fe.Status)
+			}
+		case forgeconntest.GitLab:
+			if err != nil {
+				t.Errorf("ReopenPR of a merged merge request = %v, want the ignored event's success", err)
+			}
+		default:
+			t.Fatalf("no expectation written for %s", p)
+		}
+		if pr := readPR(t, c, 3); pr.State != forge.ItemMerged {
+			t.Errorf("ReadPR after reopening a merged pull request = state %q, want merged", pr.State)
+		}
+	})
+	handledAll(t, srv)
+}
+
+func testCloseIssue(t *testing.T, p forgeconntest.Product) {
+	srv, c := open(t, p, world())
+	if err := c.CloseIssue(t.Context(), appItem(10)); err != nil {
+		t.Fatalf("CloseIssue: %v", err)
+	}
+	if is := readIssue(t, c, 10); is.State != forge.ItemClosed || !is.UpdatedAt.After(t0) {
+		t.Errorf("ReadIssue after closing = state %q updated %v, want closed with a newer updated time", is.State, is.UpdatedAt)
 	}
 	handledAll(t, srv)
 }
 
-func TestCloseIssue_and_ReopenIssue_move_the_issue(t *testing.T) {
-	t.Parallel()
-	srv, c := open(t, world())
-	if err := c.CloseIssue(t.Context(), appItem(10)); err != nil {
-		t.Fatalf("CloseIssue: %v", err)
-	}
-	if is := readIssue(t, c, 10); is.State != forge.ItemClosed {
-		t.Errorf("ReadIssue after closing = state %q, want closed", is.State)
-	}
+func testReopenIssue(t *testing.T, p forgeconntest.Product) {
+	srv, c := open(t, p, world())
 	if err := c.ReopenIssue(t.Context(), appItem(11)); err != nil {
 		t.Fatalf("ReopenIssue: %v", err)
 	}
@@ -191,21 +271,14 @@ func TestCloseIssue_and_ReopenIssue_move_the_issue(t *testing.T) {
 	handledAll(t, srv)
 }
 
-func TestLabels_add_and_remove_change_the_items_labels(t *testing.T) {
-	t.Parallel()
-	srv, c := open(t, world())
+func testAddLabels(t *testing.T, p forgeconntest.Product) {
+	srv, c := open(t, p, world())
 	t.Run("pull_request", func(t *testing.T) {
 		if err := c.AddLabels(t.Context(), appItem(1), forge.KindPullRequest, []string{"ready"}); err != nil {
 			t.Fatalf("AddLabels: %v", err)
 		}
 		if pr := readPR(t, c, 1); !slices.Equal(pr.Labels, []string{"bug", "ready"}) {
 			t.Errorf("labels after adding = %v, want bug and ready", pr.Labels)
-		}
-		if err := c.RemoveLabels(t.Context(), appItem(1), forge.KindPullRequest, []string{"bug", "not-carried"}); err != nil {
-			t.Fatalf("RemoveLabels: %v", err)
-		}
-		if pr := readPR(t, c, 1); !slices.Equal(pr.Labels, []string{"ready"}) {
-			t.Errorf("labels after removing = %v, want ready alone", pr.Labels)
 		}
 	})
 	t.Run("issue", func(t *testing.T) {
@@ -217,14 +290,42 @@ func TestLabels_add_and_remove_change_the_items_labels(t *testing.T) {
 		}
 	})
 	t.Run("undefined_label", func(t *testing.T) {
-		wantErr(t, c.AddLabels(t.Context(), appItem(10), forge.KindIssue, []string{"nope"}), forge.KindUpstream, forgeapi.CodeValidation)
-		if is := readIssue(t, c, 10); slices.Contains(is.Labels, "nope") {
+		wantErr(t, c.AddLabels(t.Context(), appItem(11), forge.KindIssue, []string{"nope"}), forge.KindUpstream, forgeapi.CodeValidation)
+		if is := readIssue(t, c, 11); slices.Contains(is.Labels, "nope") {
 			t.Errorf("labels after a refused addition = %v, want no nope", is.Labels)
 		}
 	})
 	t.Run("unknown_kind", func(t *testing.T) {
 		sent := len(srv.Requests())
 		wantErr(t, c.AddLabels(t.Context(), appItem(10), forge.Kind("run"), []string{"ready"}), forge.KindInvalid, "")
+		if got := srv.Requests()[sent:]; len(got) != 0 {
+			t.Errorf("requests = %q, want none", got)
+		}
+	})
+	handledAll(t, srv)
+}
+
+func testRemoveLabels(t *testing.T, p forgeconntest.Product) {
+	srv, c := open(t, p, world())
+	t.Run("pull_request", func(t *testing.T) {
+		if err := c.RemoveLabels(t.Context(), appItem(1), forge.KindPullRequest, []string{"bug", "not-carried"}); err != nil {
+			t.Fatalf("RemoveLabels: %v", err)
+		}
+		if pr := readPR(t, c, 1); len(pr.Labels) != 0 {
+			t.Errorf("labels after removing = %v, want none", pr.Labels)
+		}
+	})
+	t.Run("issue", func(t *testing.T) {
+		if err := c.RemoveLabels(t.Context(), appItem(10), forge.KindIssue, []string{"bug"}); err != nil {
+			t.Fatalf("RemoveLabels: %v", err)
+		}
+		if is := readIssue(t, c, 10); len(is.Labels) != 0 {
+			t.Errorf("labels after removing = %v, want none", is.Labels)
+		}
+	})
+	t.Run("unknown_kind", func(t *testing.T) {
+		sent := len(srv.Requests())
+		wantErr(t, c.RemoveLabels(t.Context(), appItem(10), forge.Kind("run"), []string{"bug"}), forge.KindInvalid, "")
 		if got := srv.Requests()[sent:]; len(got) != 0 {
 			t.Errorf("requests = %q, want none", got)
 		}
@@ -247,10 +348,9 @@ func runState(t *testing.T, c *forgeconn.Client, id int64) forge.CheckState {
 	return ""
 }
 
-func TestRerunFailedChecks_reruns_the_failed_run_on_the_pinned_head(t *testing.T) {
-	t.Parallel()
-	srv, c := open(t, world())
-	if err := c.RerunFailedChecks(t.Context(), appItem(1), passed); err != nil {
+func testRerunFailedChecks(t *testing.T, p forgeconntest.Product) {
+	srv, c := open(t, p, world())
+	if err := c.RerunFailedChecks(t.Context(), appItem(2), failed); err != nil {
 		t.Fatalf("RerunFailedChecks: %v", err)
 	}
 	if got := runState(t, c, 102); got != forge.CheckPending {
@@ -259,18 +359,25 @@ func TestRerunFailedChecks_reruns_the_failed_run_on_the_pinned_head(t *testing.T
 	if got := runState(t, c, 101); got != forge.CheckPassing {
 		t.Errorf("run 101 = %q, want its pass kept", got)
 	}
-	t.Run("head_no_run_carries", func(t *testing.T) {
-		wantErr(t, c.RerunFailedChecks(t.Context(), appItem(4), bare), forge.KindConflict, forgeapi.CodeStaleHead)
-	})
 	t.Run("head_with_nothing_failed", func(t *testing.T) {
-		wantErr(t, c.RerunFailedChecks(t.Context(), appItem(2), failed), forge.KindConflict, forgeapi.CodeRunNotFailed)
+		wantErr(t, c.RerunFailedChecks(t.Context(), appItem(1), passed), forge.KindConflict, forgeapi.CodeRunNotFailed)
+	})
+	// GitHub resolves a run on the pin without reading the pull request, so
+	// a pin no run carries is stale; GitLab reads the merge request's head
+	// and its pipeline.
+	t.Run("head_no_run_carries", func(t *testing.T) {
+		code := per(t, p, map[forgeconntest.Product]string{forgeconntest.GitHub: forgeapi.CodeStaleHead, forgeconntest.GitLab: forgeapi.CodeRunNotFailed})
+		wantErr(t, c.RerunFailedChecks(t.Context(), appItem(4), bare), forge.KindConflict, code)
+	})
+	t.Run("pin_not_the_head", func(t *testing.T) {
+		code := per(t, p, map[forgeconntest.Product]string{forgeconntest.GitHub: forgeapi.CodeRunNotFailed, forgeconntest.GitLab: forgeapi.CodeStaleHead})
+		wantErr(t, c.RerunFailedChecks(t.Context(), appItem(4), passed), forge.KindConflict, code)
 	})
 	handledAll(t, srv)
 }
 
-func TestRerunFailedRun_reruns_the_run(t *testing.T) {
-	t.Parallel()
-	srv, c := open(t, world())
+func testRerunFailedRun(t *testing.T, p forgeconntest.Product) {
+	srv, c := open(t, p, world())
 	run := forge.Run{Repo: appKey, ID: 102, Number: 2}
 	if err := c.RerunFailedRun(t.Context(), &run); err != nil {
 		t.Fatalf("RerunFailedRun: %v", err)
@@ -363,7 +470,7 @@ func TestMutates_marks_each_write_and_never_a_read(t *testing.T) {
 		}, []string{"PUT /api/v3/repos/acme/app/pulls/1/merge-async"}, 0},
 		{"merge_status", func() error { _, err := c.MergeStatus(ctx, appItem(1)); return err }, nil, 1},
 		{"close_issue", func() error { return c.CloseIssue(ctx, appItem(10)) }, []string{"PATCH /api/v3/repos/acme/app/issues/10"}, 0},
-		{"rerun_checks", func() error { return c.RerunFailedChecks(ctx, appItem(1), passed) }, []string{
+		{"rerun_checks", func() error { return c.RerunFailedChecks(ctx, appItem(2), failed) }, []string{
 			"POST /api/v3/repos/acme/app/actions/runs/102/rerun-failed-jobs",
 		}, 1},
 	}
@@ -387,7 +494,7 @@ func TestMutates_marks_each_write_and_never_a_read(t *testing.T) {
 
 func TestActionReads_pass_the_reserve_that_background_reads_stop_at(t *testing.T) {
 	t.Parallel()
-	srv, c := open(t, world())
+	srv, c := open(t, forgeconntest.GitHub, world())
 	srv.SetBudget(forge.ReadReserve-50, time.Now().Add(time.Hour))
 	if _, err := c.Labels(t.Context(), appKey); err != nil {
 		t.Fatalf("Labels, which learns the REST pool: %v", err)

@@ -47,7 +47,10 @@ const Token = "fake-token"
 type World struct {
 	Login string
 	Owner string
-	Repos []Repo
+	// Version is the version the instance reports, the fake's own default
+	// for the product when empty.
+	Version string
+	Repos   []Repo
 	// Remaining is the request budget each response reports (none on Gitea).
 	Remaining int
 	// PageSize caps the rows one page answers whatever the request asks, so
@@ -56,9 +59,14 @@ type World struct {
 	// UserNamespace makes the owner a GitLab user rather than a group: the
 	// group routes answer 404 and the user's project route answers.
 	UserNamespace bool
-	// GraphQLErrors answers every GraphQL search document with data beside an
-	// error, which forgeapi marks as a partial answer.
+	// GraphQLErrors answers every GitHub search document and every GitLab
+	// merge request list document with data beside an error, which forgeapi
+	// marks as a partial answer.
 	GraphQLErrors bool
+	// RefuseDocuments has GitLab refuse every document but the owner lookup,
+	// as an instance whose schema lacks a field they select does: forgeapi
+	// then reads REST for the connection's life.
+	RefuseDocuments bool
 	// RejectToken answers the account route 401, as for a revoked token,
 	// while the detection routes still answer.
 	RejectToken bool
@@ -73,7 +81,8 @@ type World struct {
 type Repo struct {
 	// Checks maps a head commit to the state of each of its checks:
 	// success, failure, neutral or pending. A commit with no entry has no
-	// check at all.
+	// check at all. GitLab has no checks of its own: a head's pipeline is the
+	// newest of Runs on it.
 	Checks        map[string][]string
 	Name          string
 	DefaultBranch string
@@ -175,7 +184,7 @@ type Server struct {
 	mu       sync.Mutex
 	// notModified counts the 304 answers served.
 	notModified int
-	// cost is the points each GitHub document reports it cost.
+	// cost is the points each GraphQL document reports it cost.
 	cost int
 	// projectsThrottle is the whole limit of the throttle GitLab's project
 	// listings answer from, zero for the one every route answers from.
@@ -203,7 +212,7 @@ func (s *Server) Config(connection string) forgeconn.Config {
 	}
 }
 
-// SetGraphQLCost changes the points each later GitHub document reports it
+// SetGraphQLCost changes the points each later GraphQL document reports it
 // cost.
 func (s *Server) SetGraphQLCost(points int) {
 	s.mu.Lock()
@@ -436,10 +445,14 @@ func (s *Server) inject(w http.ResponseWriter, route string) bool {
 	return true
 }
 
-// graphQLOperation reads the operation name of a GitHub GraphQL request,
+// graphQLPath is where GitHub Enterprise Server and GitLab both serve
+// GraphQL.
+const graphQLPath = "/api/graphql"
+
+// graphQLOperation reads the operation name of a GraphQL request,
 // leaving the body for the handler to read again.
 func graphQLOperation(r *http.Request) (string, bool) {
-	if r.Method != http.MethodPost || r.URL.Path != ghGraphQL {
+	if r.Method != http.MethodPost || r.URL.Path != graphQLPath {
 		return "", false
 	}
 	body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))

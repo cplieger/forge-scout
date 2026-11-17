@@ -1,6 +1,8 @@
 package forgeconn
 
 import (
+	"strings"
+
 	"github.com/cplieger/forge-scout/internal/forge"
 	"github.com/cplieger/forgeapi/v3"
 )
@@ -36,15 +38,18 @@ func (c *Client) prOf(r *forgeapi.PullRequest, headRead bool) (forge.PullRequest
 		Key:   forge.ItemKey{Connection: key.Connection, Repo: key.Repo, Number: r.Ref.Number},
 		State: prStateOf(r.State), Title: r.Title, Body: r.Body, Author: r.Author, AuthorKind: accountKind(r.AuthorKind),
 		SourceBranch: r.SourceBranch, HeadSHA: r.HeadSHA, WebURL: r.WebURL, Labels: labelNames(r.Labels),
-		Head: headOf(r, headRead), Comments: r.Comments, Draft: r.Draft,
+		Head: headOf(r, headRead, c.product), Comments: r.Comments, Draft: r.Draft,
 	}, true
 }
 
 // headOf is the head-keyed half of r. A row marker other than a refused
 // rollup or a cut list inside the row (check names, reviewers: forgeapi keeps
 // the verdict exact and answers a cut count CountUnknown) leaves the half not
-// read, since the fields it covers may be missing.
-func headOf(r *forgeapi.PullRequest, headRead bool) forge.Head {
+// read, since the fields it covers may be missing. forgeapi answers both a
+// head with no check and checks it did not read as CheckUnknown; only an
+// answer that counts the head's checks tells them apart, and GitLab's one
+// pipeline status counts none.
+func headOf(r *forgeapi.PullRequest, headRead bool, product forge.Product) forge.Head {
 	refused := false
 	if p := r.Partial; p != nil {
 		switch p.Reason {
@@ -68,7 +73,7 @@ func headOf(r *forgeapi.PullRequest, headRead bool) forge.Head {
 		QueuePosition: a.QueuePosition, Approvals: a.Approvals, ChangesRequested: a.ChangesRequested,
 		Read: true, ChecksRefused: refused,
 	}
-	if !refused && a.Checks == forgeapi.CheckUnknown && a.ChecksTotal == 0 {
+	if !refused && product != forge.ProductGitLab && a.Checks == forgeapi.CheckUnknown && a.ChecksTotal == 0 {
 		h.Checks = forge.CheckNone
 	}
 	return h
@@ -100,7 +105,25 @@ func (c *Client) runOf(r *forgeapi.Run) (forge.Run, bool) {
 }
 
 func labelOf(l *forgeapi.Label) (forge.Label, bool) {
-	return forge.Label{Name: l.Name, Color: l.Color}, true
+	return forge.Label{Name: l.Name, Color: colorOf(l.Color)}, true
+}
+
+// colorOf is a forge's label colour in forge.Label's spelling. GitHub, Gitea
+// and Forgejo send the six digits alone; GitLab sends a leading # and three
+// or six digits, or a CSS colour name
+// (https://docs.gitlab.com/api/labels/#create-a-new-label).
+func colorOf(raw string) string {
+	hex := strings.ToLower(strings.TrimPrefix(raw, "#"))
+	if strings.Trim(hex, "0123456789abcdef") != "" {
+		return ""
+	}
+	switch len(hex) {
+	case 3:
+		return "#" + string([]byte{hex[0], hex[0], hex[1], hex[1], hex[2], hex[2]})
+	case 6:
+		return "#" + hex
+	}
+	return ""
 }
 
 func affordancesOf(a *forgeapi.RepoAffordances) forge.Affordances {
