@@ -5,7 +5,11 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/cplieger/forge-scout/internal/forge"
 )
+
+var fuzzRepo = forge.RepoKey{Connection: "c1", Repo: "v1.R_1"}
 
 // FuzzDecodeCodeAlerts drives the code-scanning page decode with untrusted
 // bytes: a decoded page is an array of at most one page's rows, each mapped to
@@ -25,7 +29,7 @@ func FuzzDecodeCodeAlerts(f *testing.F) {
 	security := map[string]bool{"": true, "low": true, "medium": true, "high": true, "critical": true, "unknown": true}
 	problem := map[string]bool{"": true, "none": true, "note": true, "warning": true, "error": true, "unknown": true}
 	f.Fuzz(func(t *testing.T, data string) {
-		alerts, err := decodeAlerts("o/r", []byte(data))
+		alerts, err := decodeAlerts(fuzzRepo, []byte(data))
 		if err != nil {
 			return
 		}
@@ -36,8 +40,8 @@ func FuzzDecodeCodeAlerts(f *testing.F) {
 			t.Fatalf("decodeAlerts = %d alerts, nil error, want a page of at most %d rows", len(alerts), perPage)
 		}
 		for _, a := range alerts {
-			if a.Repo != "o/r" || a.Source != "code_scanning" {
-				t.Fatalf("decodeAlerts(%q) row = %+v, want repo o/r and source code_scanning", data, a)
+			if a.Repo != fuzzRepo {
+				t.Fatalf("decodeAlerts(%q) row = %+v, want the repository it was read for", data, a)
 			}
 			if !security[a.SecuritySeverity] || !problem[a.ProblemSeverity] {
 				t.Fatalf("decodeAlerts(%q) severities %q, %q, want GitHub's values, empty or unknown", data, a.SecuritySeverity, a.ProblemSeverity)
@@ -93,7 +97,7 @@ func FuzzDecodeWorkflows(f *testing.F) {
 	f.Add(`{"workflows":[` + strings.Repeat(`{"state":"disabled_manually"},`, perPage) + `{"state":"active"}]}`)
 	known := map[string]bool{"active": true, "deleted": true, "disabled_fork": true, "disabled_inactivity": true, "disabled_manually": true}
 	f.Fuzz(func(t *testing.T, data string) {
-		defs, err := decodeWorkflows("o/r", []byte(data))
+		defs, err := decodeWorkflows(fuzzRepo, []byte(data))
 		if err != nil {
 			return
 		}
@@ -101,7 +105,7 @@ func FuzzDecodeWorkflows(f *testing.F) {
 			t.Fatalf("decodeWorkflows(%q) = %d rows, want at most %d", data, len(defs), perPage)
 		}
 		for _, w := range defs {
-			if w.Repo != "o/r" || !known[w.State] {
+			if w.Repo != fuzzRepo || !known[string(w.State)] {
 				t.Fatalf("decodeWorkflows(%q) kept %+v, want o/r's definitions in a documented state", data, w)
 			}
 		}
@@ -114,7 +118,7 @@ func FuzzDecodeWorkflows(f *testing.F) {
 			return
 		}
 		for i, w := range oracle.Workflows {
-			if w.State != defs[i].State {
+			if w.State != string(defs[i].State) {
 				t.Fatalf("decodeWorkflows(%q) row %d state %q, want %q", data, i, defs[i].State, w.State)
 			}
 		}

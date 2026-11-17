@@ -1,8 +1,8 @@
 // Package githubrest reads the two GitHub REST routes forgeapi does not model:
 // a repository's open code-scanning alerts and its workflow definitions. Every
-// status is classified on its code, never on message text, through one table
-// of what each route's answers mean. Its reads go through httpcache's
-// revalidation cache, which revalidates a page it holds.
+// status is classified on its code and headers, never on message text, and
+// every failure it returns wraps one *forge.Error. Its reads go through
+// httpcache's revalidation cache, which revalidates a page it holds.
 package githubrest
 
 import (
@@ -38,9 +38,6 @@ const (
 	// perPage before decoding them.
 	bodyCap = 8 << 20
 )
-
-// errNotFound is a 404, which each route reads in its own way.
-var errNotFound = errors.New("not found")
 
 // Client reads the GitHub REST API at one base URL with one token. It is not
 // safe for concurrent use.
@@ -86,9 +83,6 @@ func (c *Client) ReadCache() forge.ReadCache {
 	s := c.cache.State()
 	return forge.ReadCache{Hits: s.Hits, Misses: s.Misses, Saved: s.Saved}
 }
-
-// BeginScan starts a scan on the connection's quota (see ghquota.Meter).
-func (c *Client) BeginScan() { c.meter.BeginScan() }
 
 // Budget is the connection's shared REST budget (see ghquota.Meter.Budget).
 func (c *Client) Budget() forge.Budget { return c.meter.Budget() }
@@ -150,7 +144,6 @@ func APIBase(webURL, apiURL string) string {
 
 type apiAlert struct {
 	CreatedAt time.Time `json:"created_at"`
-	HTMLURL   string    `json:"html_url"`
 	Rule      struct {
 		ID                    string `json:"id"`
 		Description           string `json:"description"`
@@ -160,6 +153,13 @@ type apiAlert struct {
 	Tool struct {
 		Name string `json:"name"`
 	} `json:"tool"`
+	HTMLURL            string `json:"html_url"`
+	MostRecentInstance struct {
+		Location struct {
+			Path      string `json:"path"`
+			StartLine int    `json:"start_line"`
+		} `json:"location"`
+	} `json:"most_recent_instance"`
 	Number int64 `json:"number"`
 }
 
@@ -195,25 +195,23 @@ const maxAlertPages = 100
 // page fails the read instead of filling memory (see alertBytes).
 const maxAlertBytes = bodyCap
 
-// alertRowBytes is the fixed part of one held alert; its Repo and Source
-// share strings every row holds.
+// alertRowBytes is the fixed part of one held alert; its Repo shares the
+// strings every row holds.
 var alertRowBytes = int(reflect.TypeFor[forge.Alert]().Size())
 
 // alertBytes is what a holds beyond the strings it shares.
 func alertBytes(a *forge.Alert) int {
-	return alertRowBytes + len(a.Rule) + len(a.SecuritySeverity) + len(a.ProblemSeverity) + len(a.Tool) + len(a.URL)
+	return alertRowBytes + len(a.Rule) + len(a.SecuritySeverity) + len(a.ProblemSeverity) + len(a.Tool) + len(a.URL) + len(a.Path)
 }
-
-var errAlertsTooLarge = fmt.Errorf("alerts hold more than %d bytes", maxAlertBytes)
 
 // route is one listing this package reads and what its answers mean.
 type route struct {
 	what string
-	// firstPageNotFound is the End a 404 on the first page reads as; zero
+	// firstPageNotFound is the End a 404 on the first page reads as; empty
 	// makes every 404 a failed read.
 	firstPageNotFound forge.End
 	// maxPages bounds one repository's read; a full last page there ends it
-	// EndCut.
+	// cut at the ceiling.
 	maxPages int
 }
 
@@ -227,45 +225,44 @@ var (
 )
 
 // list reads every page of rt for repo, decoding each with decode. Any
-// answer its table does not name fails the read: a 403 is forge.ErrRateLimited
-// when its headers report a rate limit, else forge.ErrForbidden (see
-// statusError), never an empty listing.
-func list[T any](ctx context.Context, c *Client, rt route, repo string, q url.Values, path string,
-	decode func(repo string, body []byte) ([]T, error),
+// answer its table does not name fails the read (see classify), never an
+// empty listing.
+func list[T any](ctx context.Context, c *Client, rt route, repo *forge.Repo, q url.Values, path string,
+	decode func(repo forge.RepoKey, body []byte) ([]T, error),
 ) (forge.Listing[T], error) {
 	var rows []T
 	for page := 1; page <= rt.maxPages; page++ {
 		q.Set("per_page", strconv.Itoa(perPage))
 		q.Set("page", strconv.Itoa(page))
 		body, err := c.get(ctx, path, q)
-		if errors.Is(err, errNotFound) && page == 1 && rt.firstPageNotFound != 0 {
+		if fe, ok := errors.AsType[*forge.Error](err); ok && fe.Kind == forge.KindNotFound && page == 1 && rt.firstPageNotFound != "" {
 			return forge.Listing[T]{End: rt.firstPageNotFound}, nil
 		}
 		var got []T
 		if err == nil {
-			got, err = decode(repo, body)
+			got, err = decode(repo.Key, body)
 		}
 		if err != nil {
-			return forge.Listing[T]{}, fmt.Errorf("%s of %s page %d: %w", rt.what, repo, page, err)
+			return forge.Listing[T]{}, fmt.Errorf("%s of %s page %d: %w", rt.what, repo.Path, page, err)
 		}
 		rows = append(rows, got...)
 		if len(got) < perPage {
 			return forge.Listing[T]{Rows: rows, End: forge.EndWhole}, nil
 		}
 	}
-	return forge.Listing[T]{Rows: rows, End: forge.EndCut}, nil
+	return forge.Listing[T]{Rows: rows, End: forge.EndCut, Cut: forge.CutCeiling}, nil
 }
 
 // CodeScanningAlerts reads repo's open code-scanning alerts: EndNone where
 // the repository has no analyses (see codeScanning). Alerts past
-// maxAlertBytes fail the read.
-func (c *Client) CodeScanningAlerts(ctx context.Context, repo forge.Repo) (forge.Listing[forge.Alert], error) {
+// maxAlertBytes fail the read as upstream.
+func (c *Client) CodeScanningAlerts(ctx context.Context, repo *forge.Repo) (forge.Listing[forge.Alert], error) {
 	owner, name, err := segments(repo.Path)
 	if err != nil {
 		return forge.Listing[forge.Alert]{}, err
 	}
 	left := maxAlertBytes
-	decode := func(repo string, body []byte) ([]forge.Alert, error) {
+	decode := func(repo forge.RepoKey, body []byte) ([]forge.Alert, error) {
 		rows, err := decodeAlerts(repo, body)
 		if err != nil {
 			return nil, err
@@ -274,64 +271,65 @@ func (c *Client) CodeScanningAlerts(ctx context.Context, repo forge.Repo) (forge
 			left -= alertBytes(&rows[i])
 		}
 		if left < 0 {
-			return nil, errAlertsTooLarge
+			return nil, upstream(fmt.Sprintf("alerts hold more than %d bytes", maxAlertBytes))
 		}
 		return rows, nil
 	}
-	return list(ctx, c, codeScanning, repo.Path, url.Values{"state": {"open"}}, "/repos/"+owner+"/"+name+"/code-scanning/alerts", decode)
+	return list(ctx, c, codeScanning, repo, url.Values{"state": {"open"}}, "/repos/"+owner+"/"+name+"/code-scanning/alerts", decode)
 }
 
 // decodeAlerts maps one code-scanning alerts page of repo. A body that is not
 // a JSON array, null included, or that holds more rows than a page asks for,
-// is a decode failure, never an empty or a cut page.
-func decodeAlerts(repo string, body []byte) ([]forge.Alert, error) {
+// is an upstream failure, never an empty or a cut page.
+func decodeAlerts(repo forge.RepoKey, body []byte) ([]forge.Alert, error) {
 	d := jsonx.NewDecoder(bytes.NewReader(body), perPage)
 	rows, err := d.Array(nil, perPage, "alerts page", func(a *apiAlert) error { return d.Decode(a) })
 	if err == nil {
 		err = d.End()
 	}
 	if err != nil {
-		return nil, fmt.Errorf("decode alerts page: %w", err)
+		return nil, upstream("decode alerts page: " + err.Error())
 	}
 	if rows == nil {
-		return nil, errors.New("decode alerts page: not an array")
+		return nil, upstream("decode alerts page: not an array")
 	}
 	alerts := make([]forge.Alert, 0, len(rows))
 	for i := range rows {
 		a := &rows[i]
 		alerts = append(alerts, forge.Alert{
-			CreatedAt: a.CreatedAt, Repo: repo, Source: "code_scanning", Rule: cmp.Or(a.Rule.ID, a.Rule.Description),
+			CreatedAt: a.CreatedAt, Repo: repo, Rule: cmp.Or(a.Rule.ID, a.Rule.Description),
 			SecuritySeverity: severity(a.Rule.SecuritySeverityLevel, securitySeverities),
 			ProblemSeverity:  severity(a.Rule.Severity, problemSeverities),
 			Tool:             a.Tool.Name, URL: a.HTMLURL, Number: a.Number,
+			Path: a.MostRecentInstance.Location.Path, StartLine: a.MostRecentInstance.Location.StartLine,
 		})
 	}
 	return alerts, nil
 }
 
 type apiWorkflow struct {
-	Name    string `json:"name"`
-	Path    string `json:"path"`
-	State   string `json:"state"`
-	HTMLURL string `json:"html_url"`
+	Name    string              `json:"name"`
+	Path    string              `json:"path"`
+	State   forge.WorkflowState `json:"state"`
+	HTMLURL string              `json:"html_url"`
 }
 
 // Workflows reads repo's workflow definitions in every state; a state
 // outside the five GitHub documents fails the read.
-func (c *Client) Workflows(ctx context.Context, repo forge.Repo) (forge.Listing[forge.Workflow], error) {
+func (c *Client) Workflows(ctx context.Context, repo *forge.Repo) (forge.Listing[forge.Workflow], error) {
 	owner, name, err := segments(repo.Path)
 	if err != nil {
 		return forge.Listing[forge.Workflow]{}, err
 	}
-	return list(ctx, c, workflows, repo.Path, url.Values{}, "/repos/"+owner+"/"+name+"/actions/workflows", decodeWorkflows)
+	return list(ctx, c, workflows, repo, url.Values{}, "/repos/"+owner+"/"+name+"/actions/workflows", decodeWorkflows)
 }
 
 // decodeWorkflows maps one workflows page of repo. A page without a
 // workflows array, null included, holding more rows than a page asks for,
 // or naming a state outside the five GitHub documents
 // (https://docs.github.com/en/rest/actions/workflows#list-repository-workflows),
-// is a decode failure.
-func decodeWorkflows(repo string, body []byte) ([]forge.Workflow, error) {
+// is an upstream failure.
+func decodeWorkflows(repo forge.RepoKey, body []byte) ([]forge.Workflow, error) {
 	d := jsonx.NewDecoder(bytes.NewReader(body), perPage)
 	var page []apiWorkflow
 	err := d.Object(func(key string) error {
@@ -346,40 +344,45 @@ func decodeWorkflows(repo string, body []byte) ([]forge.Workflow, error) {
 		err = d.End()
 	}
 	if err != nil {
-		return nil, fmt.Errorf("decode workflows page: %w", err)
+		return nil, upstream("decode workflows page: " + err.Error())
 	}
 	if page == nil {
-		return nil, errors.New("decode workflows page: no workflows array")
+		return nil, upstream("decode workflows page: no workflows array")
 	}
 	defs := make([]forge.Workflow, 0, len(page))
 	for i := range page {
 		w := &page[i]
 		switch w.State {
-		case "active", "deleted", "disabled_fork", "disabled_inactivity", "disabled_manually":
+		case forge.WorkflowActive, forge.WorkflowDeleted, forge.WorkflowDisabledFork, forge.WorkflowDisabledInactivity, forge.WorkflowDisabledManually:
 			defs = append(defs, forge.Workflow{Repo: repo, Name: w.Name, Path: w.Path, State: w.State, URL: w.HTMLURL})
 		default:
-			return nil, fmt.Errorf("decode workflows page: unknown workflow state %q", w.State[:min(len(w.State), maxStateEcho)])
+			return nil, upstream(fmt.Sprintf("decode workflows page: unknown workflow state %q", w.State[:min(len(w.State), maxStateEcho)]))
 		}
 	}
 	return defs, nil
 }
 
 // segments splits a GitHub display path into its owner and name, each safe
-// to place in a URL path.
+// to place in a URL path; any other path is refused as invalid.
 func segments(path string) (owner, name string, err error) {
 	if err := forgeapi.ValidateSelector(forgeapi.FamilyGitHub, path); err != nil {
-		return "", "", fmt.Errorf("repository path %q is not a safe owner/name pair: %w", path, err)
+		return "", "", &forge.Error{Kind: forge.KindInvalid, Message: fmt.Sprintf("repository path %q is not a safe owner/name pair: %v", path, err)}
 	}
 	owner, name, _ = strings.Cut(path, "/")
 	return owner, name, nil
 }
 
 // get reads one page's body under the client's retry policy, which repeats
-// the answers and transport errors httpclient.IsTransient accepts.
+// the answers and transport errors httpclient.IsTransient accepts, then
+// classifies what failed.
 func (c *Client) get(ctx context.Context, route string, q url.Values) ([]byte, error) {
-	return httpclient.Do(ctx, func(ctx context.Context) ([]byte, error) {
+	body, err := httpclient.Do(ctx, func(ctx context.Context) ([]byte, error) {
 		return c.attempt(ctx, c.base+route+"?"+q.Encode())
 	}, c.retry...)
+	if err != nil {
+		return nil, classify(ctx, err)
+	}
+	return body, nil
 }
 
 func (c *Client) attempt(ctx context.Context, reqURL string) ([]byte, error) {
@@ -391,55 +394,66 @@ func (c *Client) attempt(ctx context.Context, reqURL string) ([]byte, error) {
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("X-GitHub-Api-Version", c.version)
 	resp, err := c.http.Do(req)
-	if bs, ok := errors.AsType[*forge.BudgetStopError](err); ok {
-		return nil, bs
-	}
-	if errors.Is(err, forge.ErrRefused) {
-		return nil, forge.ErrRefused
-	}
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	if err := c.statusError(resp); err != nil {
+	if err := statusError(resp); err != nil {
 		httpclient.Drain(resp.Body)
 		return nil, err
 	}
 	return httpclient.ReadLimitedBody(resp.Body, bodyCap)
 }
 
-// statusError is the package statusError, a rate limit carrying the budget
-// the shared REST pool reports after the answer that refused it.
-func (c *Client) statusError(resp *http.Response) error {
-	err := statusError(resp)
-	if errors.Is(err, forge.ErrRateLimited) {
-		return &forge.BudgetStopError{Err: err, Budget: c.meter.Budget()}
-	}
-	return err
-}
-
 // statusError classifies a non-2xx answer on its status code and headers,
-// never its body. A 403 with X-RateLimit-Remaining at 0 or a Retry-After
-// header is a rate limit. Any other 403 is forge.ErrForbidden, which GitHub
-// also answers for a secondary limit that sets neither header, so the quota
-// meter sends no more requests after it (see ghquota.Meter.Admit). Every other
-// answer is httpclient's *StatusError, which the retry loop repeats when
-// httpclient.IsRetryableStatus accepts its code.
+// never its body. A 403 that ghquota.Throttled names, and a 429, are a rate
+// limit; any other 403 is forbidden, naming the permissions GitHub's
+// X-Accepted-GitHub-Permissions header lists
+// (https://docs.github.com/en/rest/authentication/permissions-required-for-fine-grained-personal-access-tokens).
+// Every other answer is httpclient's *StatusError, which the retry loop
+// repeats when httpclient.IsRetryableStatus accepts its code.
 func statusError(resp *http.Response) error {
-	switch code := resp.StatusCode; {
+	code := resp.StatusCode
+	switch {
 	case code >= 200 && code < 300:
 		return nil
 	case code == http.StatusUnauthorized:
-		return fmt.Errorf("%w (status %d)", forge.ErrTokenInvalid, code)
-	case code == http.StatusForbidden && ghquota.Throttled(resp.Header):
-		return fmt.Errorf("%w (status %d, rate limit)", forge.ErrRateLimited, code)
+		return &forge.Error{Kind: forge.KindUnauthorized, Status: code, Message: "GitHub rejected the token"}
+	case code == http.StatusTooManyRequests, code == http.StatusForbidden && ghquota.Throttled(resp.Header):
+		return &forge.Error{Kind: forge.KindRateLimited, Status: code, RetryAfter: httpclient.ParseRetryAfterResponse(resp), Message: "GitHub rate limit"}
 	case code == http.StatusForbidden:
-		return fmt.Errorf("%w (status %d)", forge.ErrForbidden, code)
+		return &forge.Error{Kind: forge.KindForbidden, Status: code, Needs: resp.Header.Get("X-Accepted-GitHub-Permissions"), Message: "GitHub refused the read to this token"}
 	case code == http.StatusNotFound:
-		return errNotFound
-	case code == http.StatusTooManyRequests:
-		return fmt.Errorf("%w: %w", forge.ErrRateLimited, httpclient.CheckStatus(resp))
+		return &forge.Error{Kind: forge.KindNotFound, Status: code}
 	default:
 		return httpclient.CheckStatus(resp)
 	}
+}
+
+// classify is err as a *forge.Error. The caller's own cancelled or expired
+// context stays itself. A status or a failure without an answer is
+// transient when httpclient would retry it, so a later read may succeed,
+// and upstream otherwise: a refused redirect or dial, an oversized body or
+// a status that repeats.
+func classify(ctx context.Context, err error) error {
+	if fe, ok := errors.AsType[*forge.Error](err); ok {
+		return fe
+	}
+	if ctx.Err() != nil {
+		return err
+	}
+	kind := forge.KindUpstream
+	if httpclient.IsTransient(err) {
+		kind = forge.KindTransient
+	}
+	fe := &forge.Error{Kind: kind, Message: err.Error()}
+	if se, ok := errors.AsType[*httpclient.StatusError](err); ok {
+		fe.Status, fe.RetryAfter = se.Code, se.RetryAfter
+	}
+	return fe
+}
+
+// upstream is an answer GitHub sent that the client cannot use.
+func upstream(message string) *forge.Error {
+	return &forge.Error{Kind: forge.KindUpstream, Message: message}
 }
