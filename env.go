@@ -76,8 +76,7 @@ func readEnv(get func(string) string) (env, error) {
 
 var errNotDir = errors.New("not a directory")
 
-// maxShown caps the bytes of a refused DATA_DIR a start error echoes, as
-// httpserver caps a refused listen address.
+// maxShown caps the bytes of a refused DATA_DIR a start error echoes.
 const maxShown = 256
 
 // readOpsAddr is OPS_LISTEN_ADDR as the ops listener binds it, which the
