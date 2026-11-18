@@ -159,8 +159,8 @@ func assemble(ctx context.Context, in *inputs) (*assembly, error) {
 	return a, nil
 }
 
-// healthChecks are /healthz's checks. Each reason names the file and at
-// most a class word, never error text: /healthz answers without sign-in.
+// healthChecks are /healthz's checks. A reason carries at most a class
+// word, never error text: /healthz answers without sign-in.
 func healthChecks(status *health.Status, st *store.Store) []health.Check {
 	// The class is the start's, exact while nothing swaps the file: a
 	// Swap that can change it must rebuild this reason.
