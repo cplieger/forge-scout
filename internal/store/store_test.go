@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/cplieger/bolttable"
 	"github.com/cplieger/forge-scout/internal/forge"
@@ -353,6 +354,50 @@ func TestFailureAfterCloseKeepsTheOutage(t *testing.T) {
 	}
 	if class, failed := st2.Failure(); !failed || class != "newer" {
 		t.Errorf("Failure() after Close = %q, %v; want newer, true", class, failed)
+	}
+}
+
+func TestFailureDoesNotWaitForClose(t *testing.T) {
+	t.Parallel()
+	st := openStore(t, t.TempDir(), newSchema(t))
+	entered, release := make(chan struct{}), make(chan struct{})
+	viewed := make(chan error, 1)
+	go func() {
+		viewed <- st.View(t.Context(), func(*bolttable.ReadTx) error {
+			close(entered)
+			<-release
+			return nil
+		})
+	}()
+	<-entered
+	closed := make(chan error, 1)
+	go func() { closed <- st.Close() }()
+	for deadline := time.Now().Add(5 * time.Second); !errors.Is(st.Live().Err(), bolttable.ErrClosed); {
+		if time.Now().After(deadline) {
+			close(release)
+			t.Fatal("Close did not start closing the handle")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	answered := make(chan bool, 1)
+	go func() {
+		_, failed := st.Failure()
+		answered <- failed
+	}()
+	select {
+	case failed := <-answered:
+		if failed {
+			t.Error("Failure() during Close = failed, want none")
+		}
+	case <-time.After(5 * time.Second):
+		t.Error("Failure() waited for Close to finish")
+	}
+	close(release)
+	if err := <-viewed; err != nil {
+		t.Errorf("View: %v", err)
+	}
+	if err := <-closed; err != nil {
+		t.Errorf("Close: %v", err)
 	}
 }
 

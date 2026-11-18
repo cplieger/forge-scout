@@ -139,9 +139,9 @@ func (st *Store) Live() *bolttable.Live { return st.live }
 // Close closes the file and releases its lock. A second Close does nothing.
 func (st *Store) Close() error {
 	st.mu.Lock()
-	defer st.mu.Unlock()
 	if !st.closed {
 		st.closedErr, st.closed = st.live.Err(), true
 	}
+	st.mu.Unlock()
 	return st.live.Close()
 }
