@@ -327,6 +327,35 @@ func TestFailureAfterClose(t *testing.T) {
 	}
 }
 
+func TestFailureAfterCloseKeepsTheOutage(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	s := newSchema(t)
+	st, err := store.Open(dir, s, slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if err := store.SetStamp(t.Context(), st, s, store.StoreVersion+1); err != nil {
+		t.Fatalf("SetStamp: %v", err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	st2, err := store.Open(dir, newSchema(t), slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if err := st2.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if err := st2.Close(); err != nil {
+		t.Fatalf("second Close: %v", err)
+	}
+	if class, failed := st2.Failure(); !failed || class != "newer" {
+		t.Errorf("Failure() after Close = %q, %v; want newer, true", class, failed)
+	}
+}
+
 func TestLiveIsTheOpenHandle(t *testing.T) {
 	t.Parallel()
 	st := openStore(t, t.TempDir(), newSchema(t))

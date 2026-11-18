@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/cplieger/bolttable"
@@ -28,9 +29,14 @@ var commitFault func(context.Context) error
 // not open leaves the Store in its outage: every call answers an error
 // wrapping bolttable.ErrClosed, and Failure names the class.
 type Store struct {
-	live   *bolttable.Live
-	path   string
-	health bolttable.WriteHealth
+	live *bolttable.Live
+	// closedErr is live's Err when Close ran, since Live.Close replaces it
+	// with ErrClosed whatever the file's state was.
+	closedErr error
+	path      string
+	health    bolttable.WriteHealth
+	mu        sync.Mutex
+	closed    bool
 }
 
 // Open opens <dataDir>/forge-scout.db under s, holding its lock until
@@ -96,11 +102,13 @@ func (st *Store) Path() string { return st.path }
 
 // Failure is the outage class of a file that would not open (one of
 // bolttable.OpenFailure's), and whether it failed. After Close it reports
-// no failure.
+// the state the file had when it closed.
 func (st *Store) Failure() (class string, failed bool) {
 	err := st.live.Err()
 	if errors.Is(err, bolttable.ErrClosed) {
-		return "", false
+		st.mu.Lock()
+		err = st.closedErr
+		st.mu.Unlock()
 	}
 	return bolttable.OpenFailure(err)
 }
@@ -128,5 +136,12 @@ func (st *Store) WriteFailing() bool {
 // replaces the file under all of them.
 func (st *Store) Live() *bolttable.Live { return st.live }
 
-// Close closes the file and releases its lock.
-func (st *Store) Close() error { return st.live.Close() }
+// Close closes the file and releases its lock. A second Close does nothing.
+func (st *Store) Close() error {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if !st.closed {
+		st.closedErr, st.closed = st.live.Err(), true
+	}
+	return st.live.Close()
+}
