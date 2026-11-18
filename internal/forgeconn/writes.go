@@ -12,7 +12,8 @@ import (
 // MergeRequest is one merge, pinned to the head commit the caller judged.
 type MergeRequest struct {
 	// Strategy is one of the repository's Affordances.MergeStrategies; empty
-	// merges with the repository's own default.
+	// sends forgeapi's IntentDefault. mergeRequestOf owns a GitLab
+	// strategy's mapping.
 	Strategy string
 	// HeadSHA is required: the forge refuses the merge when the head moved.
 	HeadSHA string

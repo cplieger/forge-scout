@@ -1,8 +1,9 @@
 // Package githubrest reads the two GitHub REST routes forgeapi does not model:
 // a repository's open code-scanning alerts and its workflow definitions. Every
 // status is classified on its code and headers, never on message text, and
-// every failure it returns wraps one *forge.Error. Its reads go through
-// httpcache's revalidation cache, which revalidates a page it holds.
+// every failure it returns wraps one *forge.Error, except the caller's own
+// cancelled or expired context, which stays the context error. Its reads go
+// through httpcache's revalidation cache, which revalidates a page it holds.
 package githubrest
 
 import (
