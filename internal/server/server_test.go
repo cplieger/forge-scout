@@ -185,3 +185,19 @@ func TestHostPolicyRefusesBadEntries(t *testing.T) {
 		t.Errorf("error %q names a valid entry", err)
 	}
 }
+
+func TestHostPolicyCapsARefusedEntry(t *testing.T) {
+	t.Parallel()
+	long := "bad host " + strings.Repeat("x", 4096)
+	_, err := server.HostPolicy([]string{long}, discard())
+	if err == nil {
+		t.Fatal("HostPolicy accepted the entry")
+	}
+	msg := err.Error()
+	if strings.Contains(msg, long) || len(msg) > 128 {
+		t.Errorf("error is %d bytes and echoes the whole entry: %q", len(msg), msg)
+	}
+	if !strings.Contains(msg, `"bad host xxx`) {
+		t.Errorf("error %q does not name the entry's start", msg)
+	}
+}

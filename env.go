@@ -12,6 +12,7 @@ import (
 	"github.com/cplieger/go/envx"
 	"github.com/cplieger/go/httpserver/v2"
 	"github.com/cplieger/go/slogx"
+	"github.com/cplieger/go/textsafe"
 )
 
 // The variables the process reads, with their defaults.
@@ -58,20 +59,26 @@ func readEnv(get func(string) string) (env, error) {
 	}
 	level, ok := slogx.ParseLevel(src.String(envLogLevel), slog.LevelInfo)
 	e.level, e.levelUnknown = level, !ok
+	shown := textsafe.SanitizeSingleLineBounded(e.dataDir, maxShown)
 	if !filepath.IsAbs(e.dataDir) {
-		return env{}, fmt.Errorf("%s %q is not an absolute path", envDataDir, e.dataDir)
+		return env{}, fmt.Errorf("%s %q is not an absolute path", envDataDir, shown)
 	}
 	info, err := os.Stat(e.dataDir)
 	if err != nil {
-		return env{}, fmt.Errorf("%s %q: %w", envDataDir, e.dataDir, err)
+		// os.Stat's *PathError repeats the whole path; only its cause is kept.
+		return env{}, fmt.Errorf("%s %q: %w", envDataDir, shown, errors.Unwrap(err))
 	}
 	if !info.IsDir() {
-		return env{}, fmt.Errorf("%s %q: %w", envDataDir, e.dataDir, errNotDir)
+		return env{}, fmt.Errorf("%s %q: %w", envDataDir, shown, errNotDir)
 	}
 	return e, nil
 }
 
 var errNotDir = errors.New("not a directory")
+
+// maxShown caps the bytes of a refused DATA_DIR a start error echoes, as
+// httpserver caps a refused listen address.
+const maxShown = 256
 
 // readOpsAddr is OPS_LISTEN_ADDR as the ops listener binds it, which the
 // health probe reads too.

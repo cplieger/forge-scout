@@ -2,6 +2,8 @@ package main
 
 import (
 	"log/slog"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -55,6 +57,36 @@ func TestReadEnvValues(t *testing.T) {
 	}
 	if e.level != slog.LevelWarn || e.levelUnknown {
 		t.Errorf("level = %v unknown %v, want warn", e.level, e.levelUnknown)
+	}
+}
+
+func TestReadEnvCapsARefusedDataDir(t *testing.T) {
+	t.Parallel()
+	file := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(file, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	long := strings.Repeat("./", 300)
+	cases := map[string]string{
+		"relative":        "data/" + long,
+		"missing":         "/nonexistent-forge-scout/" + long,
+		"not a directory": filepath.Dir(file) + "/" + long + "file",
+	}
+	for name, dir := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			_, err := readEnv(getenv(map[string]string{"DATA_DIR": dir}))
+			if err == nil {
+				t.Fatal("readEnv accepted the directory")
+			}
+			msg := err.Error()
+			if strings.Contains(msg, dir) || len(msg) > 400 {
+				t.Errorf("error is %d bytes and echoes the whole value: %q", len(msg), msg)
+			}
+			if !strings.HasPrefix(msg, `DATA_DIR "`+dir[:16]) {
+				t.Errorf("error %q does not name DATA_DIR and the value's start", msg)
+			}
+		})
 	}
 }
 

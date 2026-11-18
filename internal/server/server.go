@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/cplieger/go/httpserver/v2"
+	"github.com/cplieger/go/textsafe"
 )
 
 // csp is the page policy: everything from forge-scout's own origin, no
@@ -58,6 +60,10 @@ func Hosts(allowed []string) []string {
 	return append([]string{"localhost"}, allowed...)
 }
 
+// maxShownHost caps the bytes of each refused ALLOWED_HOSTS entry the start
+// error echoes: enough to tell the entry, never a pasted blob whole.
+const maxShownHost = 64
+
 // HostPolicy builds the product listener's host check over hosts, with a
 // request from this host's own network stack admitted. Any entry
 // httpserver.CanonicalHost refuses fails it, naming the entries: dropping
@@ -68,7 +74,7 @@ func HostPolicy(hosts []string, logger *slog.Logger) (*httpserver.HostPolicy, er
 	if len(invalid) > 0 {
 		quoted := make([]string, len(invalid))
 		for i, v := range invalid {
-			quoted[i] = fmt.Sprintf("%q", v)
+			quoted[i] = strconv.Quote(textsafe.SanitizeSingleLineBounded(v, maxShownHost))
 		}
 		return nil, fmt.Errorf("server: not a host name: %s", strings.Join(quoted, ", "))
 	}
