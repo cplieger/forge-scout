@@ -89,7 +89,7 @@ func TestHandlerRefusesMissingField(t *testing.T) {
 
 func TestHandlerServesAdmittedHosts(t *testing.T) {
 	t.Parallel()
-	for _, host := range []string{"localhost", "localhost:7466", "scout.example", "SCOUT.example:443"} {
+	for _, host := range []string{"localhost", "localhost:7466", "scout.example", "SCOUT.example:443", "192.168.1.20:7466", "[fd00::20]:7466"} {
 		t.Run(host, func(t *testing.T) {
 			t.Parallel()
 			rec := &recorder{}

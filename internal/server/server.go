@@ -65,12 +65,14 @@ func Hosts(allowed []string) []string {
 const maxShownHost = 64
 
 // HostPolicy builds the product listener's host check over hosts, with a
-// request from this host's own network stack admitted. Any entry
+// request from this host's own network stack admitted, and any IP-literal
+// Host admitted too, since a LAN browser reaches the container by its address
+// and a rebinding attack needs a name. Any entry
 // httpserver.CanonicalHost refuses fails it, naming the entries: dropping
 // one would leave a name the operator listed refused with no word why.
 func HostPolicy(hosts []string, logger *slog.Logger) (*httpserver.HostPolicy, error) {
 	p, invalid := httpserver.ParseHostList(hosts,
-		httpserver.WithLoopbackExempt(true), httpserver.WithHostAllowlistLogger(logger))
+		httpserver.WithLoopbackExempt(true), httpserver.WithIPLiteralHosts(true), httpserver.WithHostAllowlistLogger(logger))
 	if len(invalid) > 0 {
 		quoted := make([]string, len(invalid))
 		for i, v := range invalid {

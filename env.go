@@ -46,9 +46,7 @@ type env struct {
 func readEnv(get func(string) string) (env, error) {
 	src := envx.Source{Get: get}
 	e := env{
-		// Edge spaces in a bind address fail as a host lookup naming
-		// neither the variable nor the cause.
-		listen:  cmp.Or(strings.TrimSpace(src.String(envListen)), defaultListen),
+		listen:  httpserver.ListenAddr(src.String(envListen), defaultListen),
 		ops:     readOpsAddr(get),
 		dataDir: cmp.Or(src.String(envDataDir), defaultDataDir),
 	}
@@ -82,5 +80,5 @@ const maxShown = 256
 // readOpsAddr is OPS_LISTEN_ADDR as the ops listener binds it, which the
 // health probe reads too.
 func readOpsAddr(get func(string) string) string {
-	return httpserver.OpsAddr(envx.Source{Get: get}.String(envOps), defaultOps)
+	return httpserver.ListenAddr(envx.Source{Get: get}.String(envOps), defaultOps)
 }

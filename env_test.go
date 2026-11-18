@@ -38,7 +38,7 @@ func TestReadEnvValues(t *testing.T) {
 	dir := t.TempDir()
 	e, err := readEnv(getenv(map[string]string{
 		"DATA_DIR":        dir,
-		"LISTEN_ADDR":     " 127.0.0.1:8000\t",
+		"LISTEN_ADDR":     " 127.0.0.1:8000\t\u200b",
 		"OPS_LISTEN_ADDR": " :9000 ",
 		"ALLOWED_HOSTS":   " a.example, ,b ,",
 		"LOG_LEVEL":       "warning",
