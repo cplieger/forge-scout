@@ -10,8 +10,6 @@ package forgeconntest
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -70,11 +68,6 @@ type World struct {
 	// RejectToken answers the account route 401, as for a revoked token,
 	// while the detection routes still answer.
 	RejectToken bool
-	// Validators gives every GET answered 200 on GitHub and GitLab an ETag of
-	// its body, and answers a request whose If-None-Match names it 304 with
-	// the 200's headers and no body, as both products do; Gitea and Forgejo
-	// send no validator.
-	Validators bool
 }
 
 // Repo is one repository under the World's owner.
@@ -92,16 +85,11 @@ type Repo struct {
 	PRs    []Item
 	Issues []Item
 	// Alerts nil answers the code-scanning route 404 (no analyses).
-	Alerts []Alert
-	// AlertsRedirect, when set, answers the code-scanning route 302 to it.
-	AlertsRedirect string
-	Workflows      []Workflow
-	// RunsForbidden answers the GitHub run listing 403 with budget left and
-	// no Retry-After, as a token without Actions read gets.
-	RunsForbidden bool
-	Private       bool
-	Archived      bool
-	Fork          bool
+	Alerts    []Alert
+	Workflows []Workflow
+	Private   bool
+	Archived  bool
+	Fork      bool
 }
 
 // Run is one CI run. Outcome is success, failure, cancelled, pending or
@@ -182,13 +170,6 @@ type Server struct {
 	unhand   []string
 	world    World
 	mu       sync.Mutex
-	// notModified counts the 304 answers served.
-	notModified int
-	// cost is the points each GraphQL document reports it cost.
-	cost int
-	// projectsThrottle is the whole limit of the throttle GitLab's project
-	// listings answer from, zero for the one every route answers from.
-	projectsThrottle int
 }
 
 // New starts a fake instance of product serving a copy of w. The caller
@@ -198,7 +179,7 @@ func New(product Product, w *World) *Server {
 	if world.Remaining == 0 {
 		world.Remaining = 4900
 	}
-	s := &Server{product: product, world: world, cost: 1, answers: map[string][]injected{}}
+	s := &Server{product: product, world: world, answers: map[string][]injected{}}
 	s.Server = httptest.NewServer(http.HandlerFunc(s.serve))
 	return s
 }
@@ -210,24 +191,6 @@ func (s *Server) Config(connection string) forgeconn.Config {
 		Connection: connection, Web: s.URL, Credential: staticToken(Token), Logger: slog.New(slog.DiscardHandler),
 		PrivateAddresses: true, PlaintextHTTP: true,
 	}
-}
-
-// SetGraphQLCost changes the points each later GraphQL document reports it
-// cost.
-func (s *Server) SetGraphQLCost(points int) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.cost = points
-}
-
-// SetProjectsThrottle has later GitLab project listings answer from a
-// throttle of limit with one request of it spent, as gitlab.com answers them
-// from burst_traffic_per_user_free_plan, 100 a minute, while every other
-// route answers from throttle_authenticated_api.
-func (s *Server) SetProjectsThrottle(limit int) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.projectsThrottle = limit
 }
 
 // SetBudget changes the budget later responses report.
@@ -343,13 +306,6 @@ func (s *Server) Requests() []string {
 	return append([]string(nil), s.requests...)
 }
 
-// NotModified is how many requests the fake answered 304.
-func (s *Server) NotModified() int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.notModified
-}
-
 // Unhandled lists the requests the fake did not serve.
 func (s *Server) Unhandled() []string {
 	s.mu.Lock()
@@ -367,43 +323,7 @@ func (s *Server) record(line string, handled bool) {
 func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.world.Validators && r.Method == http.MethodGet && (s.product == GitHub || s.product == GitLab) {
-		rec := httptest.NewRecorder()
-		s.answer(rec, r)
-		s.revalidate(w, r, rec)
-		return
-	}
 	s.answer(w, r)
-}
-
-// revalidate writes rec's answer to w, as a 304 when it is a 200 whose ETag
-// the request's If-None-Match names.
-func (s *Server) revalidate(w http.ResponseWriter, r *http.Request, rec *httptest.ResponseRecorder) {
-	h := w.Header()
-	maps.Copy(h, rec.Header())
-	// The type net/http would send, set explicitly so the replayed body is
-	// never served for a browser to sniff (CodeQL go/reflected-xss).
-	ct := rec.Header().Get("Content-Type")
-	if ct == "" {
-		ct = http.DetectContentType(rec.Body.Bytes())
-	}
-	h.Set("Content-Type", ct)
-	if rec.Code != http.StatusOK {
-		w.WriteHeader(rec.Code)
-		_, _ = w.Write(rec.Body.Bytes())
-		return
-	}
-	sum := sha256.Sum256(rec.Body.Bytes())
-	tag := `W/"` + hex.EncodeToString(sum[:8]) + `"`
-	h.Set("ETag", tag)
-	if r.Header.Get("If-None-Match") == tag {
-		s.notModified++
-		h.Del("Content-Length")
-		w.WriteHeader(http.StatusNotModified)
-		return
-	}
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(rec.Body.Bytes())
 }
 
 func (s *Server) answer(w http.ResponseWriter, r *http.Request) {

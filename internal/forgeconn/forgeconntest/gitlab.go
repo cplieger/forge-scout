@@ -53,11 +53,6 @@ func (s *Server) serveGitLab(w http.ResponseWriter, r *http.Request, line string
 	h.Set("RateLimit-Limit", "2000")
 	h.Set("RateLimit-Remaining", itoa(remaining))
 	h.Set("RateLimit-Reset", itoa(int(reset.Unix())))
-	if limit := s.projectsThrottle; limit > 0 && strings.HasSuffix(r.URL.Path, "/projects") {
-		h.Set("RateLimit-Name", "burst_traffic_per_user_free_plan")
-		h.Set("RateLimit-Limit", itoa(limit))
-		h.Set("RateLimit-Remaining", itoa(limit-1))
-	}
 	if r.Method == http.MethodPost && r.URL.Path == graphQLPath {
 		return line, s.serveGitLabGraphQL(w, r)
 	}
@@ -472,7 +467,7 @@ func (s *Server) serveGitLabGraphQL(w http.ResponseWriter, r *http.Request) bool
 		}}})
 		return true
 	}
-	data := map[string]any{"project": nil, "queryComplexity": map[string]any{"score": s.cost, "limit": 200}}
+	data := map[string]any{"project": nil, "queryComplexity": map[string]any{"score": 1, "limit": 200}}
 	var errs []any
 	if repo, ok := s.gitlabDocumentRepo(&q); ok && req.OperationName != "DocumentAcceptance" {
 		data["project"], errs = s.gitlabDocumentProject(repo, req.OperationName, &q)

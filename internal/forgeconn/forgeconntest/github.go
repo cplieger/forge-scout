@@ -110,10 +110,6 @@ func (s *Server) githubRepoRoute(w http.ResponseWriter, r *http.Request, repo *R
 	case "GET issues/{n}":
 		return s.githubIssue(w, repo, args[0])
 	case "GET actions/runs":
-		if repo.RunsForbidden {
-			writeJSON(w, http.StatusForbidden, map[string]any{"message": "Resource not accessible by personal access token"})
-			return true
-		}
 		s.githubRuns(w, r, repo)
 	case "GET actions/workflows":
 		s.githubWorkflows(w, r, repo)
@@ -297,10 +293,6 @@ func (s *Server) githubWorkflows(w http.ResponseWriter, r *http.Request, repo *R
 }
 
 func (s *Server) githubAlerts(w http.ResponseWriter, r *http.Request, repo *Repo) {
-	if repo.AlertsRedirect != "" {
-		http.Redirect(w, r, repo.AlertsRedirect, http.StatusFound)
-		return
-	}
 	if repo.Alerts == nil {
 		writeJSON(w, http.StatusNotFound, map[string]any{"message": "no analysis found"})
 		return
@@ -342,7 +334,7 @@ func (s *Server) serveGitHubGraphQL(w http.ResponseWriter, r *http.Request) bool
 	}
 	remaining, reset := s.budget()
 	data := map[string]any{"rateLimit": map[string]any{
-		"cost": s.cost, "limit": 5000, "nodeCount": 0, "remaining": remaining, "resetAt": stamp(reset), "used": 5000 - remaining,
+		"cost": 1, "limit": 5000, "nodeCount": 0, "remaining": remaining, "resetAt": stamp(reset), "used": 5000 - remaining,
 	}}
 	var errs []map[string]any
 	switch req.OperationName {
