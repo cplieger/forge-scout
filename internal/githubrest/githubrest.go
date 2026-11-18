@@ -14,7 +14,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"net/netip"
 	"net/url"
 	"reflect"
 	"slices"
@@ -28,7 +27,6 @@ import (
 	"github.com/cplieger/go/httpcache"
 	"github.com/cplieger/go/httpclient"
 	"github.com/cplieger/go/jsonx"
-	"github.com/cplieger/go/ssrf"
 )
 
 const (
@@ -99,35 +97,6 @@ func (a admitting) RoundTrip(req *http.Request) (*http.Response, error) {
 		return nil, err
 	}
 	return a.next.RoundTrip(req)
-}
-
-// HTTPClient is the client a connection's reads go through: the address a
-// dial reaches must be public unless private is set, as forgeapi holds its
-// own dials, and the port must be 443, 80 when plaintext is allowed, or
-// base's own. A refused dial is logged to logger.
-func HTTPClient(base string, private, plaintext bool, logger *slog.Logger) *http.Client {
-	return httpClient(base, private, plaintext, ssrf.WithLogger(logger))
-}
-
-func httpClient(base string, private, plaintext bool, opts ...ssrf.TransportOption) *http.Client {
-	ports := []uint16{443}
-	if plaintext {
-		ports = append(ports, 80)
-	}
-	if u, err := url.Parse(base); err == nil {
-		if n, err := strconv.ParseUint(u.Port(), 10, 16); err == nil {
-			ports = append(ports, uint16(n))
-		}
-	}
-	opts = append([]ssrf.TransportOption{ssrf.WithAllowedPorts(ports...)}, opts...)
-	if private {
-		opts = append(opts, ssrf.WithAddressPolicy(func(netip.Addr) bool { return true }))
-	}
-	return &http.Client{
-		Timeout:       30 * time.Second,
-		CheckRedirect: httpclient.RedirectPolicy(httpclient.WithSameOrigin(true)),
-		Transport:     ssrf.SafeTransport(opts...),
-	}
 }
 
 // APIBase is the REST root for a connection: apiURL when set, else

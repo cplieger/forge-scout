@@ -22,9 +22,6 @@ type Deps struct {
 	// StoreOpenFailed reports whether the product file is in its outage:
 	// it could not be opened and has not been restored since.
 	StoreOpenFailed func() bool
-	// StoreWriteFailing reports whether the last commit to the product
-	// file failed.
-	StoreWriteFailing func() bool
 	// Version is the running build's version, the build_info label.
 	Version string
 }
@@ -44,8 +41,6 @@ func New(d Deps) (*Obs, error) {
 		return nil, errors.New("obs: no version")
 	case d.StoreOpenFailed == nil:
 		return nil, errors.New("obs: no StoreOpenFailed function")
-	case d.StoreWriteFailing == nil:
-		return nil, errors.New("obs: no StoreWriteFailing function")
 	}
 	httpLabels := []string{"method", "route", "code"}
 	o := &Obs{
@@ -59,13 +54,10 @@ func New(d Deps) (*Obs, error) {
 	openFailed := measure.NewGaugeDesc("store_open_failed",
 		"1 while the file could not be opened at start and has not been restored since, by file.",
 		measure.UnitNone, []string{"file"})
-	writeFailing := measure.NewGaugeDesc("store_write_failing",
-		"1 while the last commit to the data file failed.", measure.UnitNone, nil)
 	read := measure.NewCollector(func(_ context.Context, e *measure.Emitter) {
 		e.Emit(buildInfo, 1, d.Version)
 		e.Emit(openFailed, flag(d.StoreOpenFailed()), FileData)
-		e.Emit(writeFailing, flag(d.StoreWriteFailing()))
-	}, buildInfo, openFailed, writeFailing)
+	}, buildInfo, openFailed)
 	for _, m := range []measure.Metric{o.httpRequests, o.httpDuration, read} {
 		if err := o.reg.Register(m); err != nil {
 			return nil, err

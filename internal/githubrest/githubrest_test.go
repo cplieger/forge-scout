@@ -8,8 +8,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"net/netip"
-	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -21,7 +19,6 @@ import (
 	"github.com/cplieger/forge-scout/internal/forgeconn/forgeconntest"
 	"github.com/cplieger/forge-scout/internal/ghquota"
 	"github.com/cplieger/go/httpclient"
-	"github.com/cplieger/go/ssrf"
 )
 
 const testVersion = "2026-03-10"
@@ -753,107 +750,6 @@ func TestCodeScanningAlerts_a_refused_cross_host_redirect_is_not_retried(t *test
 	}, httpclient.WithMaxAttempts(3), httpclient.WithBaseDelay(time.Millisecond))
 	if _, err := c.CodeScanningAlerts(t.Context(), &repo); err == nil || calls.Load() != 1 {
 		t.Errorf("CodeScanningAlerts redirected to another host = %v after %d requests, want an error after 1: the refusal cannot heal", err, calls.Load())
-	}
-}
-
-func TestHTTPClient_a_redirect_to_another_port_on_the_host_gets_no_token(t *testing.T) {
-	var leaked atomic.Int32
-	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "" {
-			leaked.Add(1)
-		}
-		io.WriteString(w, "[]")
-	}))
-	t.Cleanup(other.Close)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, other.URL+r.URL.RequestURI(), http.StatusFound)
-	}))
-	t.Cleanup(srv.Close)
-	var ports []uint16
-	for _, s := range []*httptest.Server{srv, other} {
-		u, err := url.Parse(s.URL)
-		if err != nil {
-			t.Fatalf("Setup: %v", err)
-		}
-		n, err := strconv.ParseUint(u.Port(), 10, 16)
-		if err != nil {
-			t.Fatalf("Setup: %v", err)
-		}
-		ports = append(ports, uint16(n))
-	}
-	// Both ports are admitted so only the redirect policy can stop the hop,
-	// as it must for a base on a custom port redirecting to 443.
-	c := New(httpClient(srv.URL, true, true, ssrf.WithAllowedPorts(ports...)), srv.URL, "test-token", testVersion, armed(),
-		slog.New(slog.DiscardHandler), httpclient.WithMaxAttempts(1))
-	if _, err := c.CodeScanningAlerts(t.Context(), &repo); err == nil || leaked.Load() != 0 {
-		t.Errorf("CodeScanningAlerts redirected to another port = %v with the token sent %d times, want an error and no token sent", err, leaked.Load())
-	}
-}
-
-// RFC 4007 section 11.2 leaves zone-ID representation implementation-defined,
-// so httpclient compares its bytes exactly and treats a case change as another
-// origin.
-func TestHTTPClient_a_redirect_to_the_host_under_another_zone_case_is_refused(t *testing.T) {
-	const base = "https://[fe80::1%25eth0]"
-	hc := httpClient(base, true, false)
-	hop := func(target string) error {
-		t.Helper()
-		orig, err := http.NewRequestWithContext(t.Context(), http.MethodGet, base+"/repos/acme/app/code-scanning/alerts", http.NoBody)
-		if err != nil {
-			t.Fatalf("Setup: %v", err)
-		}
-		next, err := http.NewRequestWithContext(t.Context(), http.MethodGet, target, http.NoBody)
-		if err != nil {
-			t.Fatalf("Setup: %v", err)
-		}
-		return hc.CheckRedirect(next, []*http.Request{orig})
-	}
-	err := hop("https://[fe80::1%25ETH0]/next")
-	if refused, ok := errors.AsType[*httpclient.RedirectRefusedError](err); !ok || refused.Reason != httpclient.RedirectOtherOrigin {
-		t.Errorf("CheckRedirect to zone ETH0 from zone eth0 = %v, want a refusal as another origin", err)
-	}
-	if err := hop("https://[fe80::1%25eth0]/next"); err != nil {
-		t.Errorf("CheckRedirect to the same zone = %v, want it followed", err)
-	}
-}
-
-// loopbackResolver answers every name with 127.0.0.1, as a rebound DNS
-// answer would, and counts its lookups.
-type loopbackResolver struct{ lookups atomic.Int32 }
-
-func (r *loopbackResolver) LookupNetIP(context.Context, string, string) ([]netip.Addr, error) {
-	r.lookups.Add(1)
-	return []netip.Addr{netip.MustParseAddr("127.0.0.1")}, nil
-}
-
-func TestHTTPClient_dials_a_private_address_only_when_the_connection_allows_it(t *testing.T) {
-	for _, private := range []bool{false, true} {
-		t.Run("private_addresses_"+strconv.FormatBool(private), func(t *testing.T) {
-			var calls atomic.Int32
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				calls.Add(1)
-				io.WriteString(w, "[]")
-			}))
-			t.Cleanup(srv.Close)
-			u, err := url.Parse(srv.URL)
-			if err != nil {
-				t.Fatalf("Setup: %v", err)
-			}
-			base := "http://forge.example.test:" + u.Port()
-			resolver := &loopbackResolver{}
-			c := New(httpClient(base, private, true, ssrf.WithResolver(resolver)), base, "test-token", testVersion, armed(),
-				slog.New(slog.DiscardHandler), httpclient.WithMaxAttempts(1))
-			_, err = c.CodeScanningAlerts(t.Context(), &repo)
-			if resolver.lookups.Load() == 0 {
-				t.Fatalf("CodeScanningAlerts resolved %s 0 times, want the dial to go through the resolver", base)
-			}
-			if private && (err != nil || calls.Load() != 1) {
-				t.Errorf("CodeScanningAlerts on loopback with private_addresses = %v after %d requests, want the read", err, calls.Load())
-			}
-			if !private && (err == nil || calls.Load() != 0) {
-				t.Errorf("CodeScanningAlerts on loopback without private_addresses = %v after %d requests, want a refused dial and no request", err, calls.Load())
-			}
-		})
 	}
 }
 

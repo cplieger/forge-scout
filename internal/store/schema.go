@@ -23,8 +23,7 @@ type meta struct {
 	StoreVersion uint32 `json:"store_version"`
 }
 
-// Schema is the file's namespaces and tables. Each slice that owns a table
-// declares it through Define before Open.
+// Schema is the file's namespaces and tables.
 type Schema struct {
 	bt    *bolttable.Schema
 	ns    map[string]*bolttable.Namespace
@@ -54,14 +53,6 @@ func NewSchema() (*Schema, error) {
 	return s, nil
 }
 
-// Define declares the table spec names with key codec k and values encoded
-// as JSON at version, which enters the namespace's format digest: raise it
-// when the encoding changes. It fails for a namespace the file does not
-// have, a prefix or name already declared, and after Open.
-func Define[K, V any](s *Schema, spec TableSpec, k bolttable.KeyCodec[K], version uint32) (*bolttable.Table[K, V], error) {
-	return define(s, spec, k, bolttable.JSON[V](version))
-}
-
 func define[K, V any](s *Schema, spec TableSpec, k bolttable.KeyCodec[K], v bolttable.Codec[V]) (*bolttable.Table[K, V], error) {
 	ns, ok := s.ns[spec.Namespace.Name]
 	if !ok || s.class[spec.Namespace.Name] != spec.Namespace.Class {
@@ -69,6 +60,3 @@ func define[K, V any](s *Schema, spec TableSpec, k bolttable.KeyCodec[K], v bolt
 	}
 	return bolttable.Define(ns, spec.Prefix, spec.Name, k, v, bolttable.TableOptions{Silent: spec.Silent})
 }
-
-// Prefixes returns the prefix of every non-silent table declared, ascending.
-func (s *Schema) Prefixes() []byte { return s.bt.Prefixes() }

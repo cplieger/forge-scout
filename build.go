@@ -126,7 +126,7 @@ type assembly struct {
 func assemble(ctx context.Context, in *inputs) (*assembly, error) {
 	st, logger := in.store, in.logger
 	storeFailed := func() bool { _, failed := st.Failure(); return failed }
-	o, err := obs.New(obs.Deps{StoreOpenFailed: storeFailed, StoreWriteFailing: st.WriteFailing, Version: version})
+	o, err := obs.New(obs.Deps{StoreOpenFailed: storeFailed, Version: version})
 	if err != nil {
 		return nil, err
 	}
@@ -171,6 +171,5 @@ func healthChecks(status *health.Status, st *store.Store) []health.Check {
 	return []health.Check{
 		{Signal: status, Reason: "forge-scout is starting or shutting down"},
 		{Signal: health.SignalFunc(func() bool { _, failed := st.Failure(); return !failed }), Reason: opened},
-		{Signal: health.SignalFunc(func() bool { return !st.WriteFailing() }), Reason: "the data file " + store.FileName + " cannot be written"},
 	}
 }

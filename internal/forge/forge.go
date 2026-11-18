@@ -1,8 +1,8 @@
 // Package forge holds the domain types every part of forge-scout shares: the
-// keys of what it stores, read states and their fold, connection conditions,
-// the rows a forge connection answers and the one error a forge failure
-// crosses packages as. It declares no interfaces and does no IO; no forge
-// library type appears in it, so a library's change stops at the adapter.
+// keys of what it stores, the rows a forge connection answers and the one
+// error a forge failure crosses packages as. It declares no interfaces and
+// does no IO; no forge library type appears in it, so a library's change
+// stops at the adapter.
 //
 // Every enum is a string type whose value is its stored, wire and metric
 // label spelling.
@@ -39,42 +39,3 @@ const ReadReserve = 250
 
 // CountUnknown is a count the forge did not report.
 const CountUnknown = -1
-
-// Condition is a standing state of a connection that a person sees and an
-// alert reads. Its value is the condition label a metric carries.
-type Condition string
-
-// The Condition members, in the order Conditions lists them.
-const (
-	ConditionNotSignedIn        Condition = "not_signed_in"
-	ConditionCredentialDisabled Condition = "credential_disabled" //nolint:gosec // G101 matches the word credential; this is a condition code
-	ConditionOwnerUnresolved    Condition = "owner_unresolved"
-	ConditionReconnectRequired  Condition = "reconnect_required"
-	ConditionReadOnly           Condition = "read_only"
-	ConditionSealingKeyMissing  Condition = "sealing_key_missing"
-	// ConditionHeld is one request pool held after a primary rate limit,
-	// until its reset.
-	ConditionHeld Condition = "held"
-	// ConditionBehind is a connection that missed its read floor.
-	ConditionBehind Condition = "behind"
-	// ConditionUnreachable is a forge that failed three cycles in a row.
-	ConditionUnreachable Condition = "unreachable"
-	// ConditionSlowed is the whole connection held after a secondary limit.
-	ConditionSlowed Condition = "slowed"
-	// ConditionStretched is GitHub's GraphQL allowance spacing the lists over
-	// more than one cycle.
-	ConditionStretched Condition = "stretched"
-	// ConditionPaced is background reads stopped at GitHub's response-time
-	// cap.
-	ConditionPaced Condition = "paced"
-)
-
-// Conditions is every Condition, the fixed label set a metric declares.
-func Conditions() []Condition {
-	return []Condition{
-		ConditionNotSignedIn, ConditionCredentialDisabled, ConditionOwnerUnresolved,
-		ConditionReconnectRequired, ConditionReadOnly, ConditionSealingKeyMissing,
-		ConditionHeld, ConditionBehind, ConditionUnreachable, ConditionSlowed,
-		ConditionStretched, ConditionPaced,
-	}
-}

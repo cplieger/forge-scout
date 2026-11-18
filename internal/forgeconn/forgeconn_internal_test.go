@@ -41,7 +41,7 @@ func (s *stub) MergePR(_ context.Context, _ forgeapi.RepoRef, _ forgeapi.PRRef, 
 
 func (s *stub) ConnectionCaps(context.Context) (forgeapi.ConnectionCaps, error) { return s.caps, nil }
 
-func (s *stub) Whoami(context.Context) (forgeapi.Account, error) {
+func (*stub) Whoami(context.Context) (forgeapi.Account, error) {
 	return forgeapi.Account{Login: "octo"}, nil
 }
 func (s *stub) BudgetState() forgeapi.BudgetState { return s.budget }

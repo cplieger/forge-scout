@@ -15,26 +15,18 @@ import (
 // FileName is the product file's name in the data directory.
 const FileName = "forge-scout.db"
 
-// writeClass is the one WriteHealth class: every write is the product's.
-const writeClass = "write"
-
 // lockWait is how long Open waits for another holder of the file's lock,
 // the window a restarted container's old process has to exit.
 var lockWait = 5 * time.Second
 
-// commitFault is Options.CommitFault, nil outside tests.
-var commitFault func(context.Context) error
-
 // Store is the product file on one bolttable.Live handle. A file that would
-// not open leaves the Store in its outage: every call answers an error
-// wrapping bolttable.ErrClosed, and Failure names the class.
+// not open leaves the Store in its outage, and Failure names the class.
 type Store struct {
 	live *bolttable.Live
 	// closedErr is live's Err when Close ran, since Live.Close replaces it
 	// with ErrClosed whatever the file's state was.
 	closedErr error
 	path      string
-	health    bolttable.WriteHealth
 	mu        sync.Mutex
 	closed    bool
 }
@@ -53,7 +45,6 @@ func Open(dataDir string, s *Schema, logger *slog.Logger) (*Store, error) {
 		Reset:       bolttable.ResetPolicy{Allow: func(d bolttable.NamespaceDigest) bool { return s.class[d.Name] == Derived }, Keep: 1},
 		LockWait:    lockWait,
 		InvalidFile: bolttable.InvalidFileFail,
-		CommitFault: commitFault,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("store: %s: %w", path, err)
@@ -112,29 +103,6 @@ func (st *Store) Failure() (class string, failed bool) {
 	}
 	return bolttable.OpenFailure(err)
 }
-
-// View runs fn in a read transaction.
-func (st *Store) View(ctx context.Context, fn func(*bolttable.ReadTx) error) error {
-	return st.live.View(ctx, fn)
-}
-
-// Update runs fn in a write transaction and records its commit's outcome
-// for WriteFailing.
-func (st *Store) Update(ctx context.Context, fn func(*bolttable.Tx) error) error {
-	err := st.live.Update(ctx, fn)
-	st.health.Record(writeClass, err)
-	return err
-}
-
-// WriteFailing reports that the latest commit failed.
-func (st *Store) WriteFailing() bool {
-	rec, _ := st.health.Class(writeClass)
-	return rec.Failing
-}
-
-// Live is the handle every store of the file shares, for a Swap that
-// replaces the file under all of them.
-func (st *Store) Live() *bolttable.Live { return st.live }
 
 // Close closes the file and releases its lock. A second Close does nothing.
 func (st *Store) Close() error {

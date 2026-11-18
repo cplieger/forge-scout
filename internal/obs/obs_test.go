@@ -14,20 +14,16 @@ import (
 	"github.com/cplieger/go/measure/v2"
 )
 
-// page is an Obs whose store series read the two flags.
+// page is an Obs whose store series reads the flag.
 type page struct {
-	obs                     *obs.Obs
-	openFailed, writeFailed *atomic.Bool
+	obs        *obs.Obs
+	openFailed *atomic.Bool
 }
 
 func newPage(t *testing.T) page {
 	t.Helper()
-	p := page{openFailed: new(atomic.Bool), writeFailed: new(atomic.Bool)}
-	o, err := obs.New(obs.Deps{
-		Version:           "4.0.0-test",
-		StoreOpenFailed:   p.openFailed.Load,
-		StoreWriteFailing: p.writeFailed.Load,
-	})
+	p := page{openFailed: new(atomic.Bool)}
+	o, err := obs.New(obs.Deps{Version: "4.0.0-test", StoreOpenFailed: p.openFailed.Load})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -66,9 +62,8 @@ func TestNew_refusesMissingDependency(t *testing.T) {
 		name string
 		deps obs.Deps
 	}{
-		{"no version", obs.Deps{StoreOpenFailed: ok, StoreWriteFailing: ok}},
-		{"no open function", obs.Deps{Version: "v", StoreWriteFailing: ok}},
-		{"no write function", obs.Deps{Version: "v", StoreOpenFailed: ok}},
+		{"no version", obs.Deps{StoreOpenFailed: ok}},
+		{"no open function", obs.Deps{Version: "v"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			o, err := obs.New(tc.deps)
@@ -100,23 +95,17 @@ func TestBuildInfo(t *testing.T) {
 func TestStoreSeries_readAtScrape(t *testing.T) {
 	p := newPage(t)
 	for _, tc := range []struct {
-		name                     string
-		openFailed, writeFailing bool
+		name       string
+		openFailed bool
 	}{
-		{"healthy", false, false},
-		{"open failed", true, false},
-		{"write failing", false, true},
-		{"both", true, true},
-		{"restored", false, false},
+		{"healthy", false},
+		{"open failed", true},
+		{"restored", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			p.openFailed.Store(tc.openFailed)
-			p.writeFailed.Store(tc.writeFailing)
 			if got, want := p.value(t, "forge_scout_store_open_failed", "data"), flag(tc.openFailed); got != want {
 				t.Errorf("store_open_failed{file=data} = %v, want %v", got, want)
-			}
-			if got, want := p.value(t, "forge_scout_store_write_failing"), flag(tc.writeFailing); got != want {
-				t.Errorf("store_write_failing = %v, want %v", got, want)
 			}
 		})
 	}
@@ -174,7 +163,6 @@ func TestHandler_servesThePage(t *testing.T) {
 	for _, tc := range []struct{ name, line string }{
 		{"build info", `forge_scout_build_info{version="4.0.0-test"} 1`},
 		{"open failed", `forge_scout_store_open_failed{file="data"} 1`},
-		{"write failing", `forge_scout_store_write_failing 0`},
 		{"requests", `forge_scout_http_requests_total{code="200",method="GET",route="GET /metrics"} 1`},
 		{"duration", `forge_scout_http_request_duration_seconds_count{code="200",method="GET",route="GET /metrics"} 1`},
 		{"runtime", `go_goroutines `},

@@ -14,13 +14,13 @@ require (
 	github.com/cplieger/go/measure/v2 v2.0.0
 	github.com/cplieger/go/ownersock v1.0.0-dev.3
 	github.com/cplieger/go/slogx v1.1.0
-	github.com/cplieger/go/ssrf v1.1.0
 	github.com/cplieger/go/textsafe v1.1.0
 )
 
 require (
 	github.com/cplieger/go/filesafe v1.2.0-dev.1 // indirect
 	github.com/cplieger/go/pathinside v1.1.0 // indirect
+	github.com/cplieger/go/ssrf v1.1.0 // indirect
 	github.com/cplieger/go/urlform v1.2.0 // indirect
 	go.etcd.io/bbolt v1.5.0 // indirect
 	golang.org/x/sync v0.25.0 // indirect

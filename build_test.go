@@ -45,7 +45,6 @@ func TestServeStartsAndStops(t *testing.T) {
 		for _, want := range []string{
 			`forge_scout_build_info{version="dev"} 1`,
 			`forge_scout_store_open_failed{file="data"} 0`,
-			`forge_scout_store_write_failing 0`,
 		} {
 			if !strings.Contains(body, want) {
 				t.Errorf("/metrics lacks %s", want)

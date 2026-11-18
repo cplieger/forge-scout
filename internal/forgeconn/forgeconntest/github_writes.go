@@ -134,7 +134,7 @@ func (s *Server) githubSetIssueState(w http.ResponseWriter, r *http.Request, rep
 // request or a pin naming another head, 405 for a method the repository
 // turns off or a state that cannot merge now, otherwise the pending answer,
 // with the merge made at once.
-func (s *Server) githubMerge(w http.ResponseWriter, r *http.Request, repo *Repo, it *Item) {
+func (*Server) githubMerge(w http.ResponseWriter, r *http.Request, repo *Repo, it *Item) {
 	var body struct {
 		Method string `json:"merge_method"`
 		SHA    string `json:"sha"`

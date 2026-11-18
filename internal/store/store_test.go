@@ -2,19 +2,15 @@ package store_test
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/cplieger/bolttable"
-	"github.com/cplieger/forge-scout/internal/forge"
 	"github.com/cplieger/forge-scout/internal/store"
 )
 
@@ -47,18 +43,18 @@ func newSchema(t *testing.T) *store.Schema {
 // versions.
 type tables struct {
 	schema *store.Schema
-	mutes  *bolttable.Table[forge.ItemKey, placeholder]
-	repos  *bolttable.Table[forge.RepoKey, placeholder]
+	mutes  *bolttable.Table[[]byte, placeholder]
+	repos  *bolttable.Table[[]byte, placeholder]
 }
 
 func withTables(t *testing.T, ownerVersion, forgeVersion uint32) tables {
 	t.Helper()
 	s := newSchema(t)
-	mutes, err := store.Define[forge.ItemKey, placeholder](s, store.Mutes, store.ItemKeyCodec{}, ownerVersion)
+	mutes, err := store.Define[[]byte, placeholder](s, mutesSpec(t), bolttable.BytesKey{}, ownerVersion)
 	if err != nil {
 		t.Fatalf("Define mutes: %v", err)
 	}
-	repos, err := store.Define[forge.RepoKey, placeholder](s, store.Repositories, store.RepoKeyCodec{}, forgeVersion)
+	repos, err := store.Define[[]byte, placeholder](s, reposSpec(t), bolttable.BytesKey{}, forgeVersion)
 	if err != nil {
 		t.Fatalf("Define repositories: %v", err)
 	}
@@ -66,8 +62,8 @@ func withTables(t *testing.T, ownerVersion, forgeVersion uint32) tables {
 }
 
 var (
-	muteKey = forge.ItemKey{Connection: "home", Repo: "v1.72", Number: 4}
-	repoKey = forge.RepoKey{Connection: "home", Repo: "v1.72"}
+	muteKey = []byte("mute")
+	repoKey = []byte("repo")
 )
 
 // seed writes one row in each table of tb and closes the file.
@@ -77,7 +73,7 @@ func seed(t *testing.T, dir string, tb tables) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	err = st.Update(t.Context(), func(tx *bolttable.Tx) error {
+	err = store.Live(st).Update(t.Context(), func(tx *bolttable.Tx) error {
 		if err := tb.mutes.Put(tx, muteKey, &placeholder{Value: "mute"}); err != nil {
 			return err
 		}
@@ -178,24 +174,6 @@ func TestNewerStampRefused(t *testing.T) {
 	}
 }
 
-func TestOutageRefusesCalls(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "forge-scout.db"), bytes.Repeat([]byte{0xAB}, 64<<10), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	st := openStore(t, dir, newSchema(t))
-	if err := st.View(t.Context(), func(*bolttable.ReadTx) error { return nil }); !errors.Is(err, bolttable.ErrClosed) {
-		t.Errorf("View in the outage = %v, want ErrClosed", err)
-	}
-	if err := st.Update(t.Context(), func(*bolttable.Tx) error { return nil }); !errors.Is(err, bolttable.ErrClosed) {
-		t.Errorf("Update in the outage = %v, want ErrClosed", err)
-	}
-	if st.WriteFailing() {
-		t.Error("WriteFailing() in the outage = true, want false: no commit ran")
-	}
-}
-
 func TestDamagedFileLeftInPlace(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -237,7 +215,7 @@ func TestForgeFormatChangeResetsForgeAlone(t *testing.T) {
 	if class, failed := st.Failure(); failed {
 		t.Fatalf("Failure() = %q, want none", class)
 	}
-	err := st.View(t.Context(), func(r *bolttable.ReadTx) error {
+	err := store.Live(st).View(t.Context(), func(r *bolttable.ReadTx) error {
 		if _, found, err := tb.mutes.Get(r, muteKey); err != nil || !found {
 			t.Errorf("owner row after the reset: found %v, %v; want kept", found, err)
 		}
@@ -268,49 +246,6 @@ func TestSecondOpenLocked(t *testing.T) {
 	}
 	if err != nil && !strings.Contains(err.Error(), filepath.Join(dir, "forge-scout.db")) {
 		t.Errorf("second Open's error %q does not name the file", err)
-	}
-}
-
-// TestWriteFailing runs serially: it sets the commit fault.
-func TestWriteFailing(t *testing.T) {
-	var fail atomic.Bool
-	store.SetCommitFault(t, func(context.Context) error {
-		if fail.Load() {
-			return errors.New("disk full")
-		}
-		return nil
-	})
-	tb := withTables(t, 1, 1)
-	st := openStore(t, t.TempDir(), tb.schema)
-	n := 0
-	put := func() error {
-		n++
-		return st.Update(t.Context(), func(tx *bolttable.Tx) error {
-			return tb.repos.Put(tx, repoKey, &placeholder{Value: strconv.Itoa(n)})
-		})
-	}
-	if err := put(); err != nil || st.WriteFailing() {
-		t.Fatalf("healthy Update = %v, WriteFailing %v; want nil, false", err, st.WriteFailing())
-	}
-	fail.Store(true)
-	if err := put(); !errors.Is(err, bolttable.ErrCommit) {
-		t.Errorf("faulted Update = %v, want ErrCommit", err)
-	}
-	if !st.WriteFailing() {
-		t.Error("WriteFailing() after a failed commit = false, want true")
-	}
-	if err := st.Update(t.Context(), func(*bolttable.Tx) error { return errors.New("refused") }); err == nil {
-		t.Error("Update returning its own error succeeded")
-	}
-	if !st.WriteFailing() {
-		t.Error("WriteFailing() after the caller's own error = false, want still true")
-	}
-	fail.Store(false)
-	if err := put(); err != nil {
-		t.Errorf("recovered Update = %v", err)
-	}
-	if st.WriteFailing() {
-		t.Error("WriteFailing() after a commit = true, want false")
 	}
 }
 
@@ -363,7 +298,7 @@ func TestFailureDoesNotWaitForClose(t *testing.T) {
 	entered, release := make(chan struct{}), make(chan struct{})
 	viewed := make(chan error, 1)
 	go func() {
-		viewed <- st.View(t.Context(), func(*bolttable.ReadTx) error {
+		viewed <- store.Live(st).View(t.Context(), func(*bolttable.ReadTx) error {
 			close(entered)
 			<-release
 			return nil
@@ -372,7 +307,7 @@ func TestFailureDoesNotWaitForClose(t *testing.T) {
 	<-entered
 	closed := make(chan error, 1)
 	go func() { closed <- st.Close() }()
-	for deadline := time.Now().Add(5 * time.Second); !errors.Is(st.Live().Err(), bolttable.ErrClosed); {
+	for deadline := time.Now().Add(5 * time.Second); !errors.Is(store.Live(st).Err(), bolttable.ErrClosed); {
 		if time.Now().After(deadline) {
 			close(release)
 			t.Fatal("Close did not start closing the handle")
@@ -398,19 +333,5 @@ func TestFailureDoesNotWaitForClose(t *testing.T) {
 	}
 	if err := <-closed; err != nil {
 		t.Errorf("Close: %v", err)
-	}
-}
-
-func TestLiveIsTheOpenHandle(t *testing.T) {
-	t.Parallel()
-	st := openStore(t, t.TempDir(), newSchema(t))
-	if err := st.Live().Err(); err != nil {
-		t.Errorf("Live().Err() = %v, want nil on an open store", err)
-	}
-	if err := st.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
-	if err := st.Live().Err(); !errors.Is(err, bolttable.ErrClosed) {
-		t.Errorf("Live().Err() after Close = %v, want ErrClosed", err)
 	}
 }
