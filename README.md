@@ -31,7 +31,7 @@ Both ports answer only a request whose `Host` is `localhost` or a name in `ALLOW
 | `ALLOWED_HOSTS` | empty | host names separated by commas, such as `forge-scout,scout.example.com`; the start fails naming any entry that is not a host name |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn` or `error`; any other value logs at `info` with a warning |
 
-A blank variable is the same as an unset one. forge-scout logs JSON lines to standard output.
+An empty variable is the same as an unset one. forge-scout logs JSON lines to standard output.
 
 `forge-scout health` asks `/healthz` on the ops port over loopback and exits 0 when it answers `200`, which the image's `HEALTHCHECK` runs. `/healthz` answers `503` while forge-scout starts or stops, and when `forge-scout.db` cannot be opened or written; its `reasons` say which. A data file that cannot be opened does not stop the start: both ports serve, and `/healthz` names the file and why (`damaged`, `format`, `newer`, `unreadable` or `unwritable`). A data file another forge-scout process holds does: the start waits 5 seconds for it, then exits 1 naming the file.
 

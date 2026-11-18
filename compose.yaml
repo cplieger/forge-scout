@@ -1,4 +1,4 @@
-# Example compose for forge-scout. See the README for all configuration options and hardening.
+# Example compose for forge-scout. See the README for all configuration options.
 services:
   forge-scout:
     image: ghcr.io/cplieger/forge-scout:latest
@@ -6,8 +6,6 @@ services:
     restart: unless-stopped
     # Must own the ./data host folder. If .env sets PUID and PGID, those numbers are used.
     user: "${PUID:-1000}:${PGID:-1000}"
-    # forge-scout writes only under /data, so the rest stays read-only.
-    read_only: true
 
     environment:
       # Host names the two ports answer besides localhost, separated by commas: the name
