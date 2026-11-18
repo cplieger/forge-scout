@@ -61,7 +61,7 @@ var (
 	Workflows       = TableSpec{Namespace: NSForge, Name: "workflows", Prefix: 0x25}
 	Alerts          = TableSpec{Namespace: NSForge, Name: "alerts", Prefix: 0x26}
 	Labels          = TableSpec{Namespace: NSForge, Name: "labels", Prefix: 0x27}
-	RepoReads       = TableSpec{Namespace: NSForge, Name: "repo_reads", Prefix: 0x28}
+	RepoReads       = TableSpec{Namespace: NSForge, Name: "repo_reads", Prefix: 0x28, Silent: true}
 	ConnectionReads = TableSpec{Namespace: NSForge, Name: "connection_reads", Prefix: 0x29}
 	Budgets         = TableSpec{Namespace: NSForge, Name: "budgets", Prefix: 0x2A}
 	Reasons         = TableSpec{Namespace: NSForge, Name: "reasons", Prefix: 0x2B}
@@ -74,9 +74,8 @@ var (
 // Namespaces lists every namespace of the file.
 func Namespaces() []NamespaceSpec { return []NamespaceSpec{NSOwner, NSForge, NSHistory} }
 
-// Tables lists every table of the file. A table enters here when the slice
-// that owns it is built; NewSchema declares Meta, and each owner declares
-// its own table through Define.
+// Tables lists every table of the file. NewSchema declares Meta; each
+// table's owner declares its own through Define.
 func Tables() []TableSpec {
 	return []TableSpec{
 		Meta, Credentials, Mutes, Marks, Actions, WriteTimes, Removals, Held, DisabledSeen,

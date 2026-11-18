@@ -58,6 +58,23 @@ func TestTablesPlacement(t *testing.T) {
 	}
 }
 
+// TestSilentTables pins which tables record no change-feed subject: a table
+// with no change kind must be silent, or the change feed refuses the schema.
+func TestSilentTables(t *testing.T) {
+	t.Parallel()
+	want := []string{"credentials", "disabled_seen", "held", "meta", "removals", "repo_reads", "write_times"}
+	var got []string
+	for _, tb := range store.Tables() {
+		if tb.Silent {
+			got = append(got, tb.Name)
+		}
+	}
+	slices.Sort(got)
+	if !slices.Equal(got, want) {
+		t.Errorf("silent tables = %v, want %v", got, want)
+	}
+}
+
 // fullSchema declares every table but Meta, which NewSchema declares, over
 // placeholder rows.
 func fullSchema(t *testing.T) *store.Schema {
