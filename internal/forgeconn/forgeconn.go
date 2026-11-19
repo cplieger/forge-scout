@@ -61,13 +61,24 @@ type Client struct {
 // Open detects the connection's family and product, identifies its account
 // and checks the configured owners against the family's owner form. A failure
 // is wrapped in forge.ErrConnection unless it is a credential, budget or
-// cancellation failure; one after the product is known is a *forge.OpenError
-// carrying the product and the budget the open's responses reported. logger
-// carries the connection: forgeapi's lines gain the product once it is named.
-// meter (see ghquota.Meter.Admit) and spent (see Client.price) see every
-// attempt, retries and the open's included.
+// cancellation failure; one after the product is known, or a detection read
+// deferred at the reserve, is a *forge.OpenError carrying the product and
+// budget it has. logger carries the connection: forgeapi's lines gain the
+// product once it is named. meter (see ghquota.Meter.Admit) and spent (see
+// Client.price) see every attempt, retries and the open's included.
 func Open(ctx context.Context, c *config.Connection, logger *slog.Logger, meter *ghquota.Meter, spent *spend.Meter) (*Client, error) {
 	stamp := &forgeHandler{inner: logger.Handler(), product: new(atomic.Int64)}
+	// named records the product as soon as it is known, a deferred detection
+	// read's included, so the open's attempts are priced as that product's.
+	// Armed then, the meter reads the budget from the account read, before
+	// the first read of a scan.
+	named := func(p forge.Product) {
+		stamp.product.Store(int64(p))
+		spent.Name(p)
+		if p == forge.ProductGitHub {
+			meter.Arm()
+		}
+	}
 	spent.Detect()
 	core, family, err := families.Open(ctx,
 		forgeapi.Connection{WebBaseURL: c.URL, APIBaseURL: c.APIURL},
@@ -84,17 +95,13 @@ func Open(ctx context.Context, c *config.Connection, logger *slog.Logger, meter 
 		forgeapi.WithRequestObserver(meter.ObserveRequest),
 	)
 	if err != nil {
-		return nil, connectionError("open", err)
-	}
-	// Armed as soon as the product is known, the meter reads the budget from
-	// the account read, before the first read of a scan.
-	client, err := newClient(ctx, core, family, c.Owners, spent, func(p forge.Product) {
-		stamp.product.Store(int64(p))
-		spent.Name(p)
-		if p == forge.ProductGitHub {
-			meter.Arm()
+		err = detectionError(err)
+		if oe, ok := errors.AsType[*forge.OpenError](err); ok && oe.Product != forge.ProductUnknown {
+			named(oe.Product)
 		}
-	})
+		return nil, err
+	}
+	client, err := newClient(ctx, core, family, c.Owners, spent, named)
 	if err != nil {
 		if oe, ok := errors.AsType[*forge.OpenError](err); ok {
 			state := core.BudgetState()
@@ -465,6 +472,32 @@ func mapErr(err error) error {
 		return fmt.Errorf("%w: %v", forge.ErrForbidden, err)
 	default:
 		return err
+	}
+}
+
+// detectionError maps a failed families.Open. A deferred detection read
+// carries the family that asked and the held pool's figures, since no client
+// is left to read them from.
+func detectionError(err error) error {
+	mapped := connectionError("open", err)
+	var fe *forgeapi.Error
+	if !errors.Is(mapped, forge.ErrReadDeferred) || !errors.As(err, &fe) {
+		return mapped
+	}
+	b := budgetOf(&forgeapi.BudgetState{Remaining: fe.Remaining, Reset: fe.Reset})
+	return &forge.OpenError{Product: familyProduct(fe.Family), Budget: &b, Err: mapped}
+}
+
+// familyProduct is the product a family names alone: the Gitea family
+// serves two, so it names none.
+func familyProduct(f forgeapi.Family) forge.Product {
+	switch f {
+	case forgeapi.FamilyGitHub:
+		return forge.ProductGitHub
+	case forgeapi.FamilyGitLab:
+		return forge.ProductGitLab
+	default:
+		return forge.ProductUnknown
 	}
 }
 

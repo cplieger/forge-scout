@@ -111,10 +111,12 @@ type Item struct {
 	// AuthorType is the GitHub document's author __typename, such as Bot,
 	// left out of the answer where empty.
 	AuthorType string
-	HeadSHA    string
-	Labels     []string
-	Number     int
-	Draft      bool
+	// HeadSHA is a full commit id: forgeapi resolves any other spelling on
+	// GitLab with a commit read this fake does not serve.
+	HeadSHA string
+	Labels  []string
+	Number  int
+	Draft   bool
 	// ChecksForbidden has GitHub refuse the pull request's check rollup with
 	// FORBIDDEN beside every other field, as it answers a fine-grained token
 	// on a private repository.

@@ -331,7 +331,9 @@ var (
 )
 
 // OpenError is an open that failed after the connection named its product,
-// so the failure is still reported under that product.
+// or whose detection read was deferred at the reserve, so the failure is
+// still reported under them. Product is ProductUnknown when the connection
+// named none.
 type OpenError struct {
 	Err error
 	// Budget is the budget the open's responses reported, nil when the

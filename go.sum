@@ -1,5 +1,5 @@
-github.com/cplieger/forgeapi/v3 v3.0.0-dev.3 h1:z2s2a2rcdfmjtioMgxjaNeZiDKEjLUajFzS1X22B0Ks=
-github.com/cplieger/forgeapi/v3 v3.0.0-dev.3/go.mod h1:9BeBZAOxALG5o+oPVXoZPjJ9NsdhTQMcVAgwLWuz2wU=
+github.com/cplieger/forgeapi/v3 v3.0.0-dev.6 h1:smcc3K9uPeZDc8RTX8vV4SWYiUyogT7GmoyZkt7cBLQ=
+github.com/cplieger/forgeapi/v3 v3.0.0-dev.6/go.mod h1:l3G1twK7hSGenW32aDJRWnTeDJCCOXeJsGT1tMkLZqI=
 github.com/cplieger/go/filesafe v1.2.0-dev.1 h1:dAx3rSGWZaF4GfrL8a8tnBd7kHliXJ3RR+DFFePvaoE=
 github.com/cplieger/go/filesafe v1.2.0-dev.1/go.mod h1:ji4TnJD8S8kgKelJlCQxlHyX0UXQGTW1ylSBqH5xqhI=
 github.com/cplieger/go/health/v2 v2.0.0 h1:WHZiSYIyvmaFvkohJopPptEg9oW4QxRSV5HUxaeFUKo=
@@ -10,6 +10,8 @@ github.com/cplieger/go/httpclient v1.2.0 h1:E+lbIpiNkUkcq3fxdMDYn116cwx6tU1XWmn4
 github.com/cplieger/go/httpclient v1.2.0/go.mod h1:couTQSCNdgNwOotbaQREGcM4CjUKZJ4Bdb7FSkNwL8U=
 github.com/cplieger/go/jsonx v1.1.0 h1:/XBHr3vJVqKYVDteO8cZEMAdTgmT3Df/SeyNw1pdak8=
 github.com/cplieger/go/jsonx v1.1.0/go.mod h1:ry6co0JYAadIhjHtkktBSK3to4YdtEak1P7mdmQlr7U=
+github.com/cplieger/go/masked v1.0.0-dev.1 h1:Do4+avpvVJP//Jm4LLH1y468Rxrz966dAgESVp/z7wU=
+github.com/cplieger/go/masked v1.0.0-dev.1/go.mod h1:jRx6ZGlfjrDaAQ5n8MTd023wl5rLuacKmtDbnJgrD+g=
 github.com/cplieger/go/scheduler/v2 v2.0.0-dev.1 h1:fRVtD+xXanV2ETy1GZweHTrMElfxvZCleIzrrggQSRs=
 github.com/cplieger/go/scheduler/v2 v2.0.0-dev.1/go.mod h1:wBsJM6M7edm3V8PiJXKWtkL/m88zZCMTJTErxzDQWZI=
 github.com/cplieger/go/slogx v1.1.0 h1:whWmZcNmLuWGFM33SYFR+alUTfEodzBjKju44DHNgPY=

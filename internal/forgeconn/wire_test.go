@@ -22,6 +22,8 @@ import (
 
 var wireNow = time.Now().UTC().Truncate(time.Second)
 
+const wireHead = "aaa1110000000000000000000000000000000000"
+
 // world is the instance every product's fake serves in these tests.
 func world() forgeconntest.World {
 	return forgeconntest.World{
@@ -29,7 +31,7 @@ func world() forgeconntest.World {
 		Repos: []forgeconntest.Repo{
 			{
 				Name: "api", DefaultBranch: "main",
-				Checks: map[string]string{"aaa111": "failure"},
+				Checks: map[string]string{wireHead: "failure"},
 				Runs: []forgeconntest.Run{
 					{
 						ID: 30, Number: 3, Workflow: "ci", Branch: "main", Event: "push", Outcome: "failure",
@@ -45,7 +47,7 @@ func world() forgeconntest.World {
 					},
 				},
 				PRs: []forgeconntest.Item{{
-					Number: 7, Title: "Add thing", Author: "someone", HeadSHA: "aaa111", Labels: []string{"feature"},
+					Number: 7, Title: "Add thing", Author: "someone", HeadSHA: wireHead, Labels: []string{"feature"},
 					Created: wireNow.Add(-48 * time.Hour), Updated: wireNow.Add(-2 * time.Hour),
 				}},
 				Issues: []forgeconntest.Item{{
@@ -365,18 +367,26 @@ func TestWire_graphql_partial_search_is_a_partial_snapshot(t *testing.T) {
 }
 
 func TestWire_governor_defers_below_the_read_reserve(t *testing.T) {
-	w := world()
-	w.Remaining = forge.ReadReserve - 50
-	srv := forgeconntest.New(forgeconntest.GitHub, w)
-	t.Cleanup(srv.Close)
-	conn := srv.Connection("test")
-	_, err := Open(t.Context(), &conn, slog.New(slog.NewTextHandler(io.Discard, nil)), ghquota.New(nil), new(spend.Meter))
-	if !errors.Is(err, forge.ErrReadDeferred) || errors.Is(err, forge.ErrConnection) {
-		t.Errorf("Open with %d left under a %d reserve = %v, want forge.ErrReadDeferred and not a connection failure", w.Remaining, forge.ReadReserve, err)
-	}
-	oe, ok := errors.AsType[*forge.OpenError](err)
-	if !ok || oe.Product != forge.ProductGitHub || oe.Budget == nil || oe.Budget.Remaining != w.Remaining || oe.Budget.Reset.IsZero() {
-		t.Errorf("Open with %d left under a %d reserve = %#v, want a *forge.OpenError naming github with the detection's budget %d and its reset", w.Remaining, forge.ReadReserve, err, w.Remaining)
+	for fake, want := range map[forgeconntest.Product]forge.Product{
+		forgeconntest.GitHub:  forge.ProductGitHub,
+		forgeconntest.GitLab:  forge.ProductGitLab,
+		forgeconntest.Forgejo: forge.ProductUnknown,
+	} {
+		t.Run(string(fake), func(t *testing.T) {
+			w := world()
+			w.Remaining = forge.ReadReserve - 50
+			srv := forgeconntest.New(fake, w)
+			t.Cleanup(srv.Close)
+			conn := srv.Connection("test")
+			_, err := Open(t.Context(), &conn, slog.New(slog.NewTextHandler(io.Discard, nil)), ghquota.New(nil), new(spend.Meter))
+			if !errors.Is(err, forge.ErrReadDeferred) || errors.Is(err, forge.ErrConnection) {
+				t.Errorf("Open on %s with %d left under a %d reserve = %v, want forge.ErrReadDeferred and not a connection failure", fake, w.Remaining, forge.ReadReserve, err)
+			}
+			oe, ok := errors.AsType[*forge.OpenError](err)
+			if !ok || oe.Product != want || oe.Budget == nil || oe.Budget.Remaining != w.Remaining || oe.Budget.Reset.IsZero() {
+				t.Errorf("Open on %s with %d left under a %d reserve = %#v, want a *forge.OpenError naming %s with the detection's budget %d and its reset", fake, w.Remaining, forge.ReadReserve, err, want, w.Remaining)
+			}
+		})
 	}
 }
 
