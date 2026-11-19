@@ -23,6 +23,8 @@ import (
 	"github.com/cplieger/go/slogx/capture"
 )
 
+const headSHA = "abc0000000000000000000000000000000000000"
+
 func world(owner string) forgeconntest.World {
 	t0 := time.Now().UTC().Truncate(time.Second)
 	return forgeconntest.World{
@@ -33,9 +35,9 @@ func world(owner string) forgeconntest.World {
 				ID: 7, Number: 2, Workflow: "ci", Branch: "main", Event: "push", Outcome: "failure",
 				Created: t0.Add(-time.Hour), Started: t0.Add(-59 * time.Minute), Updated: t0.Add(-50 * time.Minute),
 			}},
-			PRs:    []forgeconntest.Item{{Number: 3, Title: "Change", Author: "someone", HeadSHA: "abc", Created: t0.Add(-time.Hour), Updated: t0}},
+			PRs:    []forgeconntest.Item{{Number: 3, Title: "Change", Author: "someone", HeadSHA: headSHA, Created: t0.Add(-time.Hour), Updated: t0}},
 			Issues: []forgeconntest.Item{{Number: 4, Title: "Bug", Author: "me", Created: t0.Add(-time.Hour), Updated: t0}},
-			Checks: map[string]string{"abc": "success"},
+			Checks: map[string]string{headSHA: "success"},
 			Alerts: []forgeconntest.Alert{{Number: 1, Rule: "go/x", Severity: "high", Tool: "CodeQL", Created: t0}},
 			Workflows: []forgeconntest.Workflow{
 				{ID: 1, Name: "nightly", Path: ".github/workflows/n.yml", State: "disabled_inactivity"},
@@ -481,38 +483,59 @@ func completeCounts(records []slog.Record) map[string]map[string]int {
 }
 
 // TestScan_a_cold_open_at_the_reserve_reports_the_budget_detection_read
-// starts against a GitHub fake whose detection answer reports the reserve,
-// so the account read is deferred inside the open, then scans again after
-// the reported reset.
+// opens at the reserve, so the read after detection is deferred, then scans
+// again after the reset. GitHub bills only its own detection answer, an open
+// that named no product every answer; Forgejo's reset is whole seconds from
+// the answer, so it can read back one second early.
 func TestScan_a_cold_open_at_the_reserve_reports_the_budget_detection_read(t *testing.T) {
-	rec := capture.Default(t)
-	gh := forgeconntest.New(forgeconntest.GitHub, world("acme"))
-	t.Cleanup(gh.Close)
-	reset := time.Now().Add(2 * time.Second).Truncate(time.Second)
-	gh.SetBudget(forge.ReadReserve, reset)
-	cfg := config.Config{Lookback: 72 * time.Hour, Connections: []config.Connection{gh.Connection("hub")}}
-	c := newCollector(t.Context(), &cfg, slog.Default(), testStore(t))
-	t.Cleanup(c.Close)
-	c.Scan(t.Context())
-	stopped := map[string]string{}
-	for _, r := range rec.Records() {
-		if r.Message == "scan stopped" {
-			r.Attrs(func(a slog.Attr) bool {
-				stopped[a.Key] = a.Value.String()
-				return true
-			})
-		}
-	}
-	wantReset := reset.UTC().Format(time.RFC3339)
-	if stopped["reason"] != "read_reserve" || stopped["phase"] != "open" || stopped["budget_remaining"] != strconv.Itoa(forge.ReadReserve) || stopped["budget_reset"] != wantReset {
-		t.Fatalf("scan stopped of a cold open at the reserve = %v, want reason read_reserve, phase open, budget_remaining %d and budget_reset %s", stopped, forge.ReadReserve, wantReset)
-	}
-	gh.SetBudget(4900, time.Time{})
-	for time.Now().Before(reset) {
-		time.Sleep(50 * time.Millisecond)
-	}
-	if got := c.Scan(t.Context()); got != collect.Complete {
-		t.Errorf("scan after the reset = %s, want complete: the connection opens once its window renews; messages %v", got, rec.Messages())
+	for _, tc := range []struct {
+		fake  forgeconntest.Product
+		forge string
+		rest  func(requests []string) int
+		early time.Duration
+	}{
+		{forgeconntest.GitHub, "github", func([]string) int { return 1 }, 0},
+		{forgeconntest.Forgejo, "unknown", func(requests []string) int { return len(requests) }, time.Second},
+	} {
+		t.Run(string(tc.fake), func(t *testing.T) {
+			rec := capture.Default(t)
+			srv := forgeconntest.New(tc.fake, world("acme"))
+			t.Cleanup(srv.Close)
+			reset := time.Now().Add(2 * time.Second).Truncate(time.Second)
+			srv.SetBudget(forge.ReadReserve, reset)
+			cfg := config.Config{Lookback: 72 * time.Hour, Connections: []config.Connection{srv.Connection("hub")}}
+			c := newCollector(t.Context(), &cfg, slog.Default(), testStore(t))
+			t.Cleanup(c.Close)
+			c.Scan(t.Context())
+			stopped := map[string]string{}
+			for _, r := range rec.Records() {
+				switch r.Message {
+				case "scan stopped":
+					r.Attrs(func(a slog.Attr) bool {
+						stopped[a.Key] = a.Value.String()
+						return true
+					})
+				case "scan degraded":
+					t.Errorf("a cold open at the reserve logged scan degraded, want none: the reserve is no degradation")
+				}
+			}
+			gotReset, err := time.Parse(time.RFC3339, stopped["budget_reset"])
+			if stopped["forge"] != tc.forge || stopped["reason"] != "read_reserve" || stopped["phase"] != "open" || stopped["degraded"] != "false" || stopped["budget_remaining"] != strconv.Itoa(forge.ReadReserve) ||
+				err != nil || gotReset.After(reset) || gotReset.Before(reset.Add(-tc.early)) {
+				t.Fatalf("scan stopped of a cold open at the reserve = %v, want forge %s, reason read_reserve, phase open, degraded false, budget_remaining %d and budget_reset %s, at most %s early", stopped, tc.forge, forge.ReadReserve, reset.UTC().Format(time.RFC3339), tc.early)
+			}
+			rest := strconv.Itoa(tc.rest(srv.Requests()))
+			if stopped["requests_rest"] != rest || stopped["requests_open"] != rest {
+				t.Errorf("scan stopped of a cold open at the reserve bills requests_rest %s and requests_open %s, want %s each; requests %v", stopped["requests_rest"], stopped["requests_open"], rest, srv.Requests())
+			}
+			srv.SetBudget(4900, time.Time{})
+			for time.Now().Before(reset) {
+				time.Sleep(50 * time.Millisecond)
+			}
+			if got := c.Scan(t.Context()); got != collect.Complete {
+				t.Errorf("scan after the reset = %s, want complete: the connection opens once its window renews; messages %v", got, rec.Messages())
+			}
+		})
 	}
 }
 
